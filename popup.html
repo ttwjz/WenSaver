@@ -36,6 +36,7 @@
             font-size: 10px;
             color: #999;
             display: block;
+            margin-top: 2px;
         }
 
         /* 开关样式 */
@@ -146,6 +147,61 @@
         .danger:hover {
             background: #fce8e6;
         }
+
+        /* === 新增：问号提示图标样式 === */
+        .tooltip-icon {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 14px;
+            height: 14px;
+            background-color: #ccc;
+            color: #fff;
+            border-radius: 50%;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: help;
+            margin-left: 4px;
+            position: relative;
+            /* 为绝对定位的气泡做基准 */
+            vertical-align: middle;
+        }
+
+        .tooltip-icon:hover {
+            background-color: #0078d4;
+        }
+
+        /* 鼠标悬停显示气泡 */
+        .tooltip-icon:hover::after {
+            content: attr(data-title);
+            /* 读取属性里的文字 */
+            position: absolute;
+            bottom: 140%;
+            /* 显示在上方 */
+            left: -10px;
+            /* 稍微靠左对齐，防止超出右侧 */
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            line-height: 1.4;
+            width: 160px;
+            text-align: left;
+            pointer-events: none;
+            z-index: 100;
+            white-space: normal;
+        }
+
+        /* 气泡的小三角 */
+        .tooltip-icon:hover::before {
+            content: "";
+            position: absolute;
+            bottom: 70%;
+            left: 3px;
+            border: 5px solid transparent;
+            border-top-color: rgba(0, 0, 0, 0.85);
+        }
     </style>
 </head>
 
@@ -162,13 +218,23 @@
 
     <!-- 历史条数限制 -->
     <div class="row">
-        <span class="label">单框最大记录数<span class="sub-label">(3 - 100)</span></span>
+        <div>
+            <span class="label">单框最大记录数</span>
+            <span class="sub-label">(3 - 100)</span>
+        </div>
         <input type="number" id="limitInput" class="num-input limit-input" min="3" max="100">
     </div>
 
-    <!-- 新增：合并间隔设置 -->
+    <!-- 新增：思考时间 (带问号提示) -->
     <div class="row">
-        <span class="label">连续编辑合并间隔<span class="sub-label">(10s - 2h)</span></span>
+        <div>
+            <div style="display:flex; align-items:center;">
+                <span class="label">思考时间</span>
+                <!-- data-title 里存放提示内容 -->
+                <span class="tooltip-icon" data-title="停止编辑超过思考时间后，才会新建而不是更新内容记录">?</span>
+            </div>
+            <span class="sub-label">(10s - 2h)</span>
+        </div>
         <div class="time-group">
             <input type="number" id="timeoutMin" class="num-input time-input" min="0" max="120" placeholder="0">分
             <input type="number" id="timeoutSec" class="num-input time-input" min="0" max="59" placeholder="0">秒
