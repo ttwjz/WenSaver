@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "文存 - 笔墨随心，字句永存",
+    "version": "1.0",
+    "description": "字失可追，文存即安。自动保存输入内容，支持独立输入框记忆、防丢失恢复。",
+    "permissions": [
+        "storage",
+        "activeTab"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "文存设置",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "32": "icons/icon32.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "options_page": "options.html",
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "css": [
+                "styles.css"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_end"
+        }
+    ]
+}

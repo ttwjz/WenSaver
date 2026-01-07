@@ -1,0 +1,190 @@
+/* ... (前部分 #is-trigger-btn, #is-history-panel, .is-header 等保持不变) ... */
+
+/* 触发按钮 */
+#is-trigger-btn {
+    position: absolute;
+    z-index: 2147483647;
+    width: 20px;
+    height: 20px;
+    background: #0078d4;
+    color: white;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    display: none;
+    user-select: none;
+}
+
+#is-history-panel {
+    position: fixed;
+    z-index: 2147483647;
+    width: 300px;
+    background: #fff;
+    border: 1px solid #ccc;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.25);
+    border-radius: 6px;
+    display: none;
+    flex-direction: column;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 13px;
+    text-align: left;
+    height: auto;
+    max-height: 80vh;
+}
+
+.is-header {
+    background: #f5f5f5;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #333;
+    flex-shrink: 0;
+    cursor: move;
+    user-select: none;
+}
+
+.is-clear {
+    color: #d93025;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: normal;
+}
+
+.is-clear:hover {
+    text-decoration: underline;
+}
+
+.is-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    max-height: 60vh;
+    padding-bottom: 5px;
+    overscroll-behavior: contain;
+}
+
+/* === 列表项布局重构 === */
+.is-item {
+    position: relative;
+    /* 关键：为按钮绝对定位提供基准 */
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    background: #fff;
+    transition: background 0.1s;
+}
+
+.is-item:hover {
+    background: #eef6ff;
+}
+
+/* 内容容器 */
+.is-item-body {
+    /* 给右侧留出 20px 的空间，防止文字遮挡按钮 */
+    padding-right: 20px;
+    min-width: 0;
+}
+
+.is-text-preview {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #333;
+    width: 100%;
+}
+
+.is-time {
+    font-size: 10px;
+    color: #999;
+    margin-top: 4px;
+}
+
+
+/* === 按钮样式 (绝对定位) === */
+
+/* 通用按钮样式 */
+.is-action-btn {
+    position: absolute;
+    right: 6px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    display: none;
+    /* 默认隐藏 */
+    color: #999;
+}
+
+.is-item:hover .is-action-btn {
+    display: block;
+}
+
+/* 删除按钮：右上 */
+.is-delete-btn {
+    top: 6px;
+}
+
+.is-delete-btn:hover {
+    color: #d93025;
+}
+
+/* 复制按钮：右下 (新增) */
+.is-copy-btn {
+    bottom: 6px;
+    font-size: 12px;
+    /* 复制图标稍微小一点 */
+}
+
+.is-copy-btn:hover {
+    color: #0078d4;
+}
+
+
+/* ... (后部分 #is-global-tooltip 等保持不变) ... */
+
+#is-global-tooltip {
+    position: fixed;
+    z-index: 2147483648;
+    display: none;
+    background: #fff;
+    color: #333;
+    padding: 10px;
+    border: 1px solid #0078d4;
+    border-radius: 4px;
+    box-shadow: 0 5px 25px rgba(0, 0, 0, 0.3);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-width: 500px;
+    min-width: 300px;
+    max-height: 400px;
+    overflow-y: auto;
+    pointer-events: auto !important;
+    cursor: text;
+    overscroll-behavior: contain;
+}
+
+#is-global-tooltip::-webkit-scrollbar {
+    width: 6px;
+}
+
+#is-global-tooltip::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+#is-global-tooltip::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}

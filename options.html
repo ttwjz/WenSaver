@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>所有输入历史</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f4f4f4;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* 头部样式 */
+        h1 {
+            border-bottom: 2px solid #0078d4;
+            padding-bottom: 10px;
+            color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            cursor: pointer;
+            border: 1px solid #ccc;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .refresh-btn {
+            background: #fff;
+            color: #333;
+        }
+
+        .refresh-btn:hover {
+            background: #eee;
+        }
+
+        /* 新增：红色清空按钮 */
+        .clear-all-btn {
+            background: #d93025;
+            color: white;
+            border-color: #d93025;
+        }
+
+        .clear-all-btn:hover {
+            background: #b02015;
+        }
+
+        /* 卡片样式 */
+        .card {
+            background: white;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            position: relative;
+            /* 为了定位复制按钮 */
+            transition: box-shadow 0.2s;
+        }
+
+        .card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-url {
+            color: #0078d4;
+            font-weight: bold;
+            text-decoration: none;
+            max-width: 300px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .card-content {
+            font-size: 14px;
+            white-space: pre-wrap;
+            color: #333;
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+
+        /* 新增：悬浮显示的复制按钮 */
+        .copy-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #0078d4;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            opacity: 0;
+            /* 默认隐藏 */
+            transition: opacity 0.2s;
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        /* 鼠标悬停在卡片上时，显示按钮 */
+        .card:hover .copy-btn {
+            opacity: 1;
+        }
+
+        .copy-btn:hover {
+            background: #006abc;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>
+        历史记录档案
+        <div class="btn-group">
+            <button id="refresh" class="refresh-btn">刷新</button>
+            <!-- 新增：清空按钮 -->
+            <button id="clearAllMain" class="clear-all-btn">清空所有记录</button>
+        </div>
+    </h1>
+    <div id="container">正在读取数据...</div>
+
+    <script src="options.js"></script>
+</body>
+
+</html>

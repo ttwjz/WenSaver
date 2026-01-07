@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 240px;
+            padding: 15px;
+            font-family: 'Segoe UI', sans-serif;
+            background: #fff;
+        }
+
+        h3 {
+            margin: 0 0 15px 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .label {
+            font-size: 13px;
+            color: #333;
+        }
+
+        /* 开关样式 */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 36px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #0078d4;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(16px);
+        }
+
+        /* 输入框样式 */
+        .num-input {
+            width: 50px;
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        /* 按钮组 */
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 13px;
+            border: 1px solid transparent;
+            transition: background 0.2s;
+        }
+
+        .primary {
+            background: #f0f0f0;
+            color: #333;
+            border-color: #ddd;
+        }
+
+        .primary:hover {
+            background: #e0e0e0;
+        }
+
+        .danger {
+            background: #fff;
+            color: #d93025;
+            border-color: #fce8e6;
+        }
+
+        .danger:hover {
+            background: #fce8e6;
+        }
+    </style>
+</head>
+
+<body>
+    <h3>文存设置</h3>
+
+    <div class="row">
+        <span class="label">启用功能</span>
+        <label class="switch">
+            <input type="checkbox" id="toggleSwitch" checked>
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <div class="row">
+        <span class="label">单框最大记录数<br><span style="font-size:10px;color:#999;">(3 - 100)</span></span>
+        <input type="number" id="limitInput" class="num-input" min="3" max="100" value="20">
+    </div>
+
+    <div class="btn-group">
+        <button id="viewAll" class="primary">查看所有历史记录</button>
+        <button id="clearAll" class="danger">清空所有记录</button>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,446 @@
+let isEnabled = true;
+let activeInput = null;
+let triggerBtn = null;
+let panel = null;
+let tooltip = null;
+
+let closeTimer = null;
+let showTimer = null;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+chrome.storage.local.get(['extensionEnabled'], (res) => {
+    isEnabled = res.extensionEnabled !== false;
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === "toggleState") {
+        isEnabled = msg.state;
+        removeUI();
+    }
+});
+
+function getSelector(el) {
+    if (el.name) return `[name="${el.name}"]`;
+    if (el.id) return `#${el.id}`;
+    let path = [];
+    while (el.nodeType === Node.ELEMENT_NODE && el.tagName !== 'HTML') {
+        let index = 1;
+        let sibling = el.previousElementSibling;
+        while (sibling) {
+            if (sibling.tagName === el.tagName) index++;
+            sibling = sibling.previousElementSibling;
+        }
+        path.unshift(`${el.tagName}:nth-of-type(${index})`);
+        el = el.parentNode;
+    }
+    return path.join(' > ');
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function (...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
+const saveInput = (e) => {
+    if (!isEnabled) return;
+    const target = e.target;
+    if (target.type === 'password') return;
+
+    let content = target.value;
+    if (target.isContentEditable) {
+        content = target.innerText;
+    }
+
+    if (!content || content.trim() === '') return;
+
+    const domain = window.location.hostname;
+    const selector = getSelector(target);
+    const storageKey = `hist_${domain}::${selector}`;
+
+    // === 功能2：同时读取 maxHistoryLimit ===
+    chrome.storage.local.get([storageKey, 'maxHistoryLimit'], (result) => {
+        let history = result[storageKey] || [];
+
+        // 获取设置的限制，默认为 20，并限制在 3-100 之间
+        let limit = parseInt(result.maxHistoryLimit);
+        if (isNaN(limit) || limit < 3) limit = 20; // 默认或者异常时用 20，也可以在这里纠正为 3
+        if (limit > 100) limit = 100;
+
+        if (history.length > 0 && history[0].content === content) {
+            history[0].timestamp = Date.now();
+        } else {
+            history.unshift({
+                content: content,
+                timestamp: Date.now(),
+                url: window.location.href
+            });
+        }
+
+        // 使用动态的 limit 而不是硬编码的 20
+        if (history.length > limit) history.pop();
+
+        chrome.storage.local.set({ [storageKey]: history });
+    });
+};
+
+document.addEventListener('input', debounce((e) => {
+    const t = e.target;
+    if (t.matches('input, textarea') || t.isContentEditable) {
+        saveInput(e);
+    }
+}, 800), true);
+
+// --- UI Logic ---
+
+document.addEventListener('dblclick', (e) => {
+    if (!isEnabled) return;
+    const t = e.target;
+    if ((t.matches('input:not([type="password"]), textarea') || t.isContentEditable)) {
+        activeInput = t;
+        showTriggerButton(activeInput);
+    }
+});
+
+function showTriggerButton(target) {
+    if (!triggerBtn) {
+        triggerBtn = document.createElement('div');
+        triggerBtn.id = 'is-trigger-btn';
+        triggerBtn.innerHTML = '◷';
+        triggerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showPanel();
+            triggerBtn.style.display = 'none';
+        });
+        document.body.appendChild(triggerBtn);
+    }
+
+    const rect = target.getBoundingClientRect();
+    triggerBtn.style.display = 'block';
+    triggerBtn.style.top = (rect.top + window.pageYOffset - 12) + 'px';
+    triggerBtn.style.left = (rect.right + window.pageXOffset - 12) + 'px';
+
+    startGlobalTracker();
+}
+
+function showPanel() {
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'is-history-panel';
+        panel.innerHTML = `
+            <div class="is-header" title="按住此处拖动窗口">
+                历史记录 
+                <span class="is-clear" title="清空">清空此框</span>
+            </div>
+            <ul class="is-list"></ul>
+        `;
+        document.body.appendChild(panel);
+
+        panel.addEventListener('mousedown', e => e.stopPropagation());
+        const listEl = panel.querySelector('.is-list');
+        addScrollLock(listEl);
+        const header = panel.querySelector('.is-header');
+        setupDraggable(panel, header);
+
+        tooltip = document.createElement('div');
+        tooltip.id = 'is-global-tooltip';
+        document.body.appendChild(tooltip);
+        addScrollLock(tooltip);
+
+        tooltip.addEventListener('scroll', () => {
+            if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+        });
+        tooltip.addEventListener('mousedown', e => e.stopPropagation());
+
+        panel.querySelector('.is-clear').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!activeInput) return;
+            if (confirm('确定清空当前输入框的所有记录？')) {
+                const key = getStorageKey(activeInput);
+                chrome.storage.local.remove(key, () => renderList([]));
+            }
+        });
+    }
+
+    const storageKey = getStorageKey(activeInput);
+    chrome.storage.local.get([storageKey], (res) => {
+        renderList(res[storageKey] || []);
+        adjustPosition(activeInput);
+    });
+
+    startGlobalTracker();
+}
+
+function addScrollLock(element) {
+    element.addEventListener('wheel', (e) => {
+        e.stopPropagation();
+        const el = element;
+        const delta = e.deltaY;
+        if (el.scrollHeight <= el.clientHeight) {
+            e.preventDefault();
+            return;
+        }
+        const isAtTop = el.scrollTop === 0;
+        const isAtBottom = Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1;
+        if ((delta < 0 && isAtTop) || (delta > 0 && isAtBottom)) {
+            e.preventDefault();
+        }
+    }, { passive: false });
+}
+
+function startGlobalTracker() {
+    document.removeEventListener('mousemove', globalMouseHandler);
+    document.addEventListener('mousemove', globalMouseHandler);
+}
+
+function stopGlobalTracker() {
+    document.removeEventListener('mousemove', globalMouseHandler);
+}
+
+function isPointInRect(x, y, element, buffer = 0) {
+    if (!element || element.style.display === 'none') return false;
+    const rect = element.getBoundingClientRect();
+    return (
+        x >= rect.left - buffer &&
+        x <= rect.right + buffer &&
+        y >= rect.top - buffer &&
+        y <= rect.bottom + buffer
+    );
+}
+
+function globalMouseHandler(e) {
+    const x = e.clientX;
+    const y = e.clientY;
+    const inPanel = isPointInRect(x, y, panel, 40);
+    const inTooltip = isPointInRect(x, y, tooltip, 40);
+    const inBtn = isPointInRect(x, y, triggerBtn, 40);
+
+    if (inPanel || inTooltip || inBtn) {
+        if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+        }
+    } else {
+        if (!closeTimer) {
+            closeTimer = setTimeout(() => {
+                hideTooltip();
+            }, 300);
+        }
+    }
+}
+
+function setupDraggable(element, handle) {
+    let isDragging = false;
+    let startX, startY, initialLeft, initialTop;
+    handle.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('is-clear')) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        const rect = element.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+        handle.style.cursor = 'grabbing';
+        e.preventDefault();
+        hideTooltip();
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        element.style.left = `${initialLeft + dx}px`;
+        element.style.top = `${initialTop + dy}px`;
+    });
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            handle.style.cursor = 'move';
+        }
+    });
+}
+
+function getStorageKey(input) {
+    return `hist_${window.location.hostname}::${getSelector(input)}`;
+}
+
+function adjustPosition(target) {
+    const rect = target.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    panel.style.visibility = 'hidden';
+    panel.style.display = 'flex';
+    const panelHeight = panel.offsetHeight;
+    const panelWidth = panel.offsetWidth;
+    let top = rect.bottom + 5;
+    let left = rect.left;
+    if (rect.bottom + panelHeight + 10 > viewportHeight && rect.top > panelHeight + 10) {
+        top = rect.top - panelHeight - 5;
+    }
+    if (left + panelWidth > viewportWidth) {
+        left = viewportWidth - panelWidth - 20;
+    }
+    if (left < 0) left = 10;
+    panel.style.top = top + 'px';
+    panel.style.left = left + 'px';
+    panel.style.visibility = 'visible';
+}
+
+function renderList(history) {
+    const list = panel.querySelector('.is-list');
+    list.innerHTML = '';
+
+    if (history.length === 0) {
+        list.innerHTML = '<li style="padding:10px;color:#999;text-align:center">暂无记录</li>';
+        return;
+    }
+
+    history.forEach((item, index) => {
+        const li = document.createElement('li');
+        li.className = 'is-item';
+
+        // === 功能1：添加复制按钮（❐）===
+        // 注意：is-action-btn 是通用类，is-delete-btn 和 is-copy-btn 控制位置
+        li.innerHTML = `
+            <div class="is-item-body">
+                <div class="is-text-preview">${escapeHtml(item.content)}</div>
+                <div class="is-time">${new Date(item.timestamp).toLocaleString()}</div>
+            </div>
+            <div class="is-action-btn is-delete-btn" title="删除此条">×</div>
+            <div class="is-action-btn is-copy-btn" title="复制内容">❐</div>
+        `;
+
+        li.addEventListener('mouseenter', () => {
+            if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+            if (showTimer) clearTimeout(showTimer);
+            showTimer = setTimeout(() => {
+                showTooltip(item.content, li);
+            }, 60);
+        });
+
+        // 点击条目主体恢复内容
+        li.addEventListener('click', (e) => {
+            // 如果点的是按钮，不触发恢复
+            if (e.target.classList.contains('is-action-btn')) return;
+
+            if (activeInput.isContentEditable) {
+                activeInput.innerText = item.content;
+            } else {
+                activeInput.value = item.content;
+            }
+            activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            removeUI();
+        });
+
+        // 删除按钮事件
+        const delBtn = li.querySelector('.is-delete-btn');
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteSingleItem(index);
+        });
+
+        // === 复制按钮事件 ===
+        const copyBtn = li.querySelector('.is-copy-btn');
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 阻止冒泡，防止恢复内容
+            navigator.clipboard.writeText(item.content).then(() => {
+                // 简单的视觉反馈
+                const originalText = copyBtn.innerText;
+                copyBtn.innerText = '✓';
+                copyBtn.style.color = '#4caf50';
+                setTimeout(() => {
+                    copyBtn.innerText = originalText;
+                    copyBtn.style.color = '';
+                }, 1000);
+            });
+        });
+
+        list.appendChild(li);
+    });
+}
+
+function showTooltip(content, targetEl) {
+    if (!tooltip) return;
+    tooltip.innerText = content;
+    tooltip.style.display = 'block';
+
+    const rect = targetEl.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+
+    let left = panelRect.right + 2;
+    let top = rect.top;
+
+    if (left + 300 > viewportWidth) {
+        left = panelRect.left - tooltip.offsetWidth - 2;
+    }
+
+    if (left < 5) left = 5;
+
+    const tooltipHeight = tooltip.offsetHeight || 100;
+    if (top + tooltipHeight > window.innerHeight) {
+        top = window.innerHeight - tooltipHeight - 10;
+    }
+    if (top < 0) top = 5;
+
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+}
+
+function hideTooltip() {
+    if (tooltip) tooltip.style.display = 'none';
+}
+
+function deleteSingleItem(index) {
+    const key = getStorageKey(activeInput);
+    chrome.storage.local.get([key], (res) => {
+        let history = res[key] || [];
+        history.splice(index, 1);
+        chrome.storage.local.set({ [key]: history }, () => {
+            renderList(history);
+            hideTooltip();
+        });
+    });
+}
+
+function removeUI() {
+    if (triggerBtn) triggerBtn.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+    hideTooltip();
+    stopGlobalTracker();
+}
+
+function escapeHtml(text) {
+    if (!text) return "";
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+document.addEventListener('mousedown', (e) => {
+    if ((tooltip && tooltip.contains(e.target)) || (panel && panel.contains(e.target))) return;
+    if (e.target !== triggerBtn && e.target !== activeInput) {
+        removeUI();
+    }
+});
+
+document.addEventListener('mousemove', (e) => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+}, { passive: true });
+
+document.addEventListener('scroll', (e) => {
+    if (panel && panel.style.display !== 'none') {
+        const isInternalScroll = (panel.contains(e.target) || (tooltip && tooltip.contains(e.target)));
+        if (isInternalScroll) {
+            globalMouseHandler({ clientX: lastMouseX, clientY: lastMouseY });
+        } else {
+            const hoveringPanel = isPointInRect(lastMouseX, lastMouseY, panel, 0);
+            const hoveringTooltip = isPointInRect(lastMouseX, lastMouseY, tooltip, 0);
+            if (hoveringPanel || hoveringTooltip) {
+                return;
+            }
+            removeUI();
+        }
+    }
+}, true);
