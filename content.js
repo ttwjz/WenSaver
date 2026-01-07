@@ -12,9 +12,8 @@ let showTimer = null;
 let lastMouseX = 0;
 let lastMouseY = 0;
 
-// === 配置常量 ===
-const SESSION_TIMEOUT = 2 * 60 * 1000; // 2分钟：判断是否为同一次编辑会话
-const DEBOUNCE_DELAY = 800; // 打字时的防抖延迟
+// 常量
+const DEBOUNCE_DELAY = 800;
 
 chrome.storage.local.get(['extensionEnabled'], (res) => {
     isEnabled = res.extensionEnabled !== false;
@@ -44,7 +43,6 @@ function getSelector(el) {
     return path.join(' > ');
 }
 
-// 防抖函数
 function debounce(func, wait) {
     let timeout;
     return function (...args) {
@@ -53,8 +51,7 @@ function debounce(func, wait) {
     };
 }
 
-// === 核心逻辑：智能保存 ===
-// isForceNew: 是否强制创建新条目（用于 focus 时保存初始状态）
+// === 核心逻辑：智能保存 (集成自定义 Timeout) ===
 const saveInput = (target, isForceNew = false) => {
     if (!isEnabled) return;
     if (target.type === 'password') return;
@@ -70,35 +67,36 @@ const saveInput = (target, isForceNew = false) => {
     const selector = getSelector(target);
     const storageKey = `hist_${domain}::${selector}`;
 
-    chrome.storage.local.get([storageKey, 'maxHistoryLimit'], (result) => {
+    chrome.storage.local.get([storageKey, 'maxHistoryLimit', 'sessionTimeout'], (result) => {
         let history = result[storageKey] || [];
 
-        // 获取限制数量
+        // 1. 获取数量限制 (默认20)
         let limit = parseInt(result.maxHistoryLimit);
         if (isNaN(limit) || limit < 3) limit = 20;
         if (limit > 100) limit = 100;
 
-        const now = Date.now();
-        const latest = history[0]; // 获取最近的一条记录
+        // 2. 获取时间间隔 (默认2分钟)
+        let timeoutMs = parseInt(result.sessionTimeout);
+        // 如果未设置或异常，默认120000ms (2分钟)，同时防止低于10秒
+        if (isNaN(timeoutMs) || timeoutMs < 10000) timeoutMs = 120000;
 
-        // --- 智能保存策略 ---
+        const now = Date.now();
+        const latest = history[0];
+
         let shouldCreateNew = true;
 
         if (latest) {
-            // 1. 如果内容完全一样，只更新时间戳，不新增
+            // 内容一致，仅更新时间
             if (latest.content === content) {
                 latest.timestamp = now;
                 shouldCreateNew = false;
             }
-            // 2. 如果不是强制新建，且满足“会话合并”条件
+            // 尝试合并会话
             else if (!isForceNew) {
                 const timeDiff = now - latest.timestamp;
 
-                // 条件A: 距离上次修改小于2分钟 (处于连续编辑流中)
-                // 条件B: 并不是完全重写 (简单的判断长度变化，或者直接信任时间间隔)
-                // 这里我们主要信任时间间隔，认为是同一波思考
-                if (timeDiff < SESSION_TIMEOUT) {
-                    // ==> 执行合并：覆盖上一条记录
+                // 使用动态的 timeoutMs
+                if (timeDiff < timeoutMs) {
                     latest.content = content;
                     latest.timestamp = now;
                     shouldCreateNew = false;
@@ -107,7 +105,6 @@ const saveInput = (target, isForceNew = false) => {
         }
 
         if (shouldCreateNew) {
-            // 新增一条记录
             history.unshift({
                 content: content,
                 timestamp: now,
@@ -115,45 +112,37 @@ const saveInput = (target, isForceNew = false) => {
             });
         }
 
-        // 限制数量
         if (history.length > limit) history.pop();
 
         chrome.storage.local.set({ [storageKey]: history });
     });
 };
 
-// 1. 输入事件：防抖保存 (处理打字过程)
 const debouncedSave = debounce((e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
-        saveInput(t, false); // false 表示尝试合并会话
+        saveInput(t, false);
     }
 }, DEBOUNCE_DELAY);
 
 document.addEventListener('input', debouncedSave, true);
 
-// 2. 聚焦事件：保存初始状态 (解决问题1)
 document.addEventListener('focus', (e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
-        // true 表示强制检查是否需要存为新条目（如果是新内容的话）
-        // 这样当你点进一个有内容的框，它会被立即存下来作为“恢复点”
-        saveInput(t, true);
+        saveInput(t, true); // 聚焦时强制检查，作为新起点
     }
-}, true); // 使用 capture 捕获，确保能监听到
+}, true);
 
-// 3. 失焦事件：立即保存最终状态 (解决问题2的尾巴)
 document.addEventListener('blur', (e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
-        // 立即执行，不防抖。
-        // 此时一般不需要强制新建，允许合并到刚才的会话中，做最后一次更新
-        saveInput(t, false);
+        saveInput(t, false); // 失焦时立即保存，允许合并
     }
 }, true);
 
 
-// --- 以下 UI 逻辑保持不变 ---
+// --- UI Logic ---
 
 document.addEventListener('dblclick', (e) => {
     if (!isEnabled) return;

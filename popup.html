@@ -29,6 +29,13 @@
         .label {
             font-size: 13px;
             color: #333;
+            line-height: 1.4;
+        }
+
+        .sub-label {
+            font-size: 10px;
+            color: #999;
+            display: block;
         }
 
         /* 开关样式 */
@@ -77,13 +84,30 @@
             transform: translateX(16px);
         }
 
-        /* 输入框样式 */
+        /* 数字输入框通用样式 */
         .num-input {
-            width: 50px;
             padding: 4px;
             border: 1px solid #ccc;
             border-radius: 4px;
             text-align: center;
+            font-size: 12px;
+        }
+
+        .limit-input {
+            width: 50px;
+        }
+
+        /* 时间输入容器 */
+        .time-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .time-input {
+            width: 35px;
         }
 
         /* 按钮组 */
@@ -126,7 +150,7 @@
 </head>
 
 <body>
-    <h3>文存设置</h3>
+    <h3>输入助手设置</h3>
 
     <div class="row">
         <span class="label">启用功能</span>
@@ -136,9 +160,19 @@
         </label>
     </div>
 
+    <!-- 历史条数限制 -->
     <div class="row">
-        <span class="label">单框最大记录数<br><span style="font-size:10px;color:#999;">(3 - 100)</span></span>
-        <input type="number" id="limitInput" class="num-input" min="3" max="100" value="20">
+        <span class="label">单框最大记录数<span class="sub-label">(3 - 100)</span></span>
+        <input type="number" id="limitInput" class="num-input limit-input" min="3" max="100">
+    </div>
+
+    <!-- 新增：合并间隔设置 -->
+    <div class="row">
+        <span class="label">连续编辑合并间隔<span class="sub-label">(10s - 2h)</span></span>
+        <div class="time-group">
+            <input type="number" id="timeoutMin" class="num-input time-input" min="0" max="120" placeholder="0">分
+            <input type="number" id="timeoutSec" class="num-input time-input" min="0" max="59" placeholder="0">秒
+        </div>
     </div>
 
     <div class="btn-group">
