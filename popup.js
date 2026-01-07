@@ -85,9 +85,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 辅助函数 ---
 
     function updateIconState(isOn) {
+        // 1. 清除原来的 ON/OFF 文字 (我们现在用图标颜色区分)
         chrome.action.setBadgeText({ text: "" });
-        const iconPath = isOn ? "icon.png" : "icon-off.png";
-        chrome.action.setIcon({ path: { "16": iconPath, "48": iconPath, "128": iconPath } });
+
+        // 2. 根据状态切换不同的图标路径
+        // 注意：路径是相对于 manifest.json 所在根目录的
+        if (isOn) {
+            chrome.action.setIcon({
+                path: {
+                    "16": "icons/icon16.png",
+                    "32": "icons/icon32.png",
+                    "48": "icons/icon48.png",
+                    "128": "icons/icon128.png"
+                }
+            });
+        } else {
+            chrome.action.setIcon({
+                path: {
+                    "16": "icons/icon-off16.png",
+                    "32": "icons/icon-off32.png",
+                    "48": "icons/icon-off48.png",
+                    "128": "icons/icon-off128.png"
+                }
+            });
+        }
     }
 
     function notifyContentScript(message) {
