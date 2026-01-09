@@ -498,28 +498,83 @@ function renderList(history) {
 
 function showTooltip(content, targetEl) {
     if (!tooltip) return;
+
+    // 1. 先填充内容，重置样式，以便计算原始尺寸
     tooltip.innerText = content;
     tooltip.style.display = 'block';
+    tooltip.style.maxWidth = '';  // 清除之前的限制
+    tooltip.style.maxHeight = ''; // 清除之前的限制
+    tooltip.style.top = '-9999px'; // 先移出屏幕防止闪烁
+    tooltip.style.left = '-9999px';
 
-    const rect = targetEl.getBoundingClientRect();
-    const panelRect = panel.getBoundingClientRect();
+    const rect = targetEl.getBoundingClientRect(); // 列表项的位置
+    const panelRect = panel.getBoundingClientRect(); // 面板的位置
     const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const gap = 2; // 间隙
 
-    let left = panelRect.right + 2;
-    let top = rect.top;
+    // === 2. 水平方向判定 (Horizontal) ===
 
-    if (left + 300 > viewportWidth) {
-        left = panelRect.left - tooltip.offsetWidth - 2;
+    // 计算左右剩余空间
+    const spaceRight = viewportWidth - panelRect.right - gap;
+    const spaceLeft = panelRect.left - gap;
+
+    // 默认最小宽度要求 (比如 300px)
+    const minDesiredWidth = 300;
+
+    let left = 0;
+    let limitWidth = 0;
+
+    // 策略：优先右侧，如果右侧不够且左侧宽裕，则放左侧
+    // 否则放空间更大的一侧
+    if (spaceRight >= minDesiredWidth || spaceRight >= spaceLeft) {
+        // 放右侧
+        left = panelRect.right + gap;
+        // 限制最大宽度不能超过右侧剩余空间 (减去一点边距)
+        limitWidth = viewportWidth - left - 10;
+    } else {
+        // 放左侧
+        // 先计算最大可用宽度
+        limitWidth = spaceLeft - 10;
+        // 后面等测量完宽度后再计算准确的 left
     }
 
+    // 应用宽度限制 (防止过宽)
+    // 这里设置 maxWidth，浏览器会自动根据文字内容换行
+    // 限制在 300px ~ 600px 之间 (或者 limitWidth)
+    const finalMaxWidth = Math.min(Math.max(limitWidth, 300), 600);
+    tooltip.style.maxWidth = `${finalMaxWidth}px`;
+
+    // 如果决定放左侧，现在有了宽度，可以计算 left 了
+    if (spaceRight < minDesiredWidth && spaceRight < spaceLeft) {
+        left = panelRect.left - tooltip.offsetWidth - gap;
+    }
+
+    // 防止左侧溢出
     if (left < 5) left = 5;
 
-    const tooltipHeight = tooltip.offsetHeight || 100;
-    if (top + tooltipHeight > window.innerHeight) {
-        top = window.innerHeight - tooltipHeight - 10;
-    }
-    if (top < 0) top = 5;
 
+    // === 3. 垂直方向判定 (Vertical) ===
+
+    const tooltipHeight = tooltip.offsetHeight;
+    let top = rect.top; // 默认与条目顶部对齐
+
+    // 检查底部是否溢出
+    if (top + tooltipHeight > viewportHeight - 10) {
+        // 溢出则向上平移，尝试贴底
+        top = viewportHeight - tooltipHeight - 10;
+    }
+
+    // 检查顶部是否溢出 (比如向上平移后，或者本身太高)
+    if (top < 10) {
+        top = 10;
+        // 实在放不下了，开启内部滚动
+        // 计算可用高度：视口高度 - 顶部留白(10) - 底部留白(10)
+        const availableHeight = viewportHeight - 20;
+        tooltip.style.maxHeight = `${availableHeight}px`;
+    }
+
+    // === 4. 应用最终坐标 ===
     tooltip.style.left = left + 'px';
     tooltip.style.top = top + 'px';
 }
