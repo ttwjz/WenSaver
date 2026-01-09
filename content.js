@@ -368,21 +368,66 @@ function adjustPosition(target) {
     const rect = target.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
+    const gap = 5; // 面板与输入框的间隙
+
+    // 1. 重置面板样式以便测量自然高度
+    // 先清除之前可能设置过的行内 max-height，恢复 CSS 里的默认 80vh
+    panel.style.maxHeight = '';
     panel.style.visibility = 'hidden';
     panel.style.display = 'flex';
-    const panelHeight = panel.offsetHeight;
+
+    const naturalHeight = panel.offsetHeight;
     const panelWidth = panel.offsetWidth;
-    let top = rect.bottom + 5;
+
+    // 2. 计算上下可用空间
+    const spaceBelow = viewportHeight - rect.bottom - gap;
+    const spaceAbove = rect.top - gap;
+
+    let top = 0;
+    let setMaxHeight = null; // 用于动态限制高度
+
+    // 3. 智能定位逻辑
+
+    // 情况 A: 下方空间充足 (首选)
+    if (spaceBelow >= naturalHeight) {
+        top = rect.bottom + gap;
+    }
+    // 情况 B: 上方空间充足 (次选)
+    else if (spaceAbove >= naturalHeight) {
+        top = rect.top - naturalHeight - gap;
+    }
+    // 情况 C: 上下都不够放 -> 选空间大的一侧并压缩面板
+    else {
+        if (spaceBelow >= spaceAbove) {
+            // 下方空间更大：放下方，限制高度
+            top = rect.bottom + gap;
+            setMaxHeight = spaceBelow - 10; // 留 10px 底部安全距离
+        } else {
+            // 上方空间更大：放上方，限制高度
+            setMaxHeight = spaceAbove - 10; // 留 10px 顶部安全距离
+            // 注意：因为高度变了，top 需要根据新的高度反算
+            top = rect.top - setMaxHeight - gap;
+        }
+    }
+
+    // 4. 水平定位 (保持原逻辑：防止右侧溢出)
     let left = rect.left;
-    if (rect.bottom + panelHeight + 10 > viewportHeight && rect.top > panelHeight + 10) {
-        top = rect.top - panelHeight - 5;
-    }
     if (left + panelWidth > viewportWidth) {
-        left = viewportWidth - panelWidth - 20;
+        left = viewportWidth - panelWidth - 10; // 靠右对齐并留缝隙
     }
-    if (left < 0) left = 10;
-    panel.style.top = top + 'px';
-    panel.style.left = left + 'px';
+    if (left < 10) left = 10; // 防止左侧溢出
+
+    // 5. 应用样式
+    if (setMaxHeight !== null) {
+        panel.style.maxHeight = `${setMaxHeight}px`;
+    } else {
+        // 如果不需要压缩，保持 CSS 里的默认限制 (80vh)
+        // 但为了保险，清空行内样式
+        panel.style.maxHeight = '';
+    }
+
+    panel.style.top = `${top}px`;
+    panel.style.left = `${left}px`;
     panel.style.visibility = 'visible';
 }
 
