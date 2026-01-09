@@ -51,7 +51,56 @@ function debounce(func, wait) {
     };
 }
 
-// === 核心逻辑：智能保存 (集成自定义 Timeout) ===
+// === 核心优化：智能演变检测算法 ===
+function isEvolution(oldStr, newStr) {
+    if (!oldStr || !newStr) return false;
+
+    const lenOld = oldStr.length;
+    const lenNew = newStr.length;
+    const maxLen = Math.max(lenOld, lenNew);
+    const diff = Math.abs(lenOld - lenNew);
+
+    // 1. 性能截断：如果长度变化极其巨大（超过50%），直接视为重写，无需后续计算
+    if (diff > maxLen * 0.5) return false;
+
+    // 2. 删除保护 (Significant Deletion Protection)
+    // 如果是删除操作 (新内容是旧内容的子集)
+    if (oldStr.includes(newStr)) {
+        // 如果删除量很小 (小于10个字 或者 小于总长度的15%)，认为是修饰，允许覆盖
+        // 否则 (删除了大段落)，为了安全起见，返回 false (新建条目，保留原版)
+        if (diff < 10 || (diff / lenOld) < 0.15) {
+            return true;
+        }
+        return false;
+    }
+
+    // 3. 追加操作 (Addition)
+    // 如果是追加 (旧内容是新内容的子集)，通常是思路延续，允许覆盖
+    if (newStr.includes(oldStr)) {
+        return true;
+    }
+
+    // 4. 修改操作 (Prefix Check with Limit)
+    // 性能优化：只检查前 500 个字符。如果前 500 个字符一致，基本就是同一篇
+    const checkLimit = 500;
+    const limit = Math.min(lenOld, lenNew, checkLimit);
+
+    let commonPrefixLen = 0;
+    for (let i = 0; i < limit; i++) {
+        if (oldStr[i] === newStr[i]) commonPrefixLen++;
+        else break;
+    }
+
+    // 阈值优化：使用比例而不是固定字符数
+    // 如果公共前缀超过了 60% (或者超过了 checkLimit，说明开头长文一致)，视为同一语境
+    if (commonPrefixLen >= checkLimit || (commonPrefixLen / maxLen) > 0.6) {
+        return true;
+    }
+
+    return false;
+}
+
+// === 核心逻辑：智能保存 ===
 const saveInput = (target, isForceNew = false) => {
     if (!isEnabled) return;
     if (target.type === 'password') return;
@@ -70,14 +119,11 @@ const saveInput = (target, isForceNew = false) => {
     chrome.storage.local.get([storageKey, 'maxHistoryLimit', 'sessionTimeout'], (result) => {
         let history = result[storageKey] || [];
 
-        // 1. 获取数量限制 (默认20)
         let limit = parseInt(result.maxHistoryLimit);
         if (isNaN(limit) || limit < 3) limit = 20;
         if (limit > 100) limit = 100;
 
-        // 2. 获取时间间隔 (默认2分钟)
         let timeoutMs = parseInt(result.sessionTimeout);
-        // 如果未设置或异常，默认120000ms (2分钟)，同时防止低于10秒
         if (isNaN(timeoutMs) || timeoutMs < 10000) timeoutMs = 120000;
 
         const now = Date.now();
@@ -86,20 +132,24 @@ const saveInput = (target, isForceNew = false) => {
         let shouldCreateNew = true;
 
         if (latest) {
-            // 内容一致，仅更新时间
+            // 1. 内容完全一致：仅更新时间
             if (latest.content === content) {
                 latest.timestamp = now;
                 shouldCreateNew = false;
             }
-            // 尝试合并会话
+            // 2. 尝试合并
             else if (!isForceNew) {
                 const timeDiff = now - latest.timestamp;
 
-                // 使用动态的 timeoutMs
+                // 时间在允许范围内
                 if (timeDiff < timeoutMs) {
-                    latest.content = content;
-                    latest.timestamp = now;
-                    shouldCreateNew = false;
+                    // 并且内容演变判定通过 (是相似内容的修改，且没有大幅删除)
+                    if (isEvolution(latest.content, content)) {
+                        latest.content = content;
+                        latest.timestamp = now;
+                        shouldCreateNew = false;
+                    }
+                    // 否则 (大幅删除或重写)，shouldCreateNew 保持 true
                 }
             }
         }
@@ -130,19 +180,19 @@ document.addEventListener('input', debouncedSave, true);
 document.addEventListener('focus', (e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
-        saveInput(t, true); // 聚焦时强制检查，作为新起点
+        saveInput(t, true);
     }
 }, true);
 
 document.addEventListener('blur', (e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
-        saveInput(t, false); // 失焦时立即保存，允许合并
+        saveInput(t, false);
     }
 }, true);
 
 
-// --- UI Logic ---
+// --- UI Logic (完全保持不变) ---
 
 document.addEventListener('dblclick', (e) => {
     if (!isEnabled) return;
