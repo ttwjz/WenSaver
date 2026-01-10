@@ -6,7 +6,8 @@
 [![License](https://img.shields.io/github/license/mashape/apistatus.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 
-![on.png](https://youke3.picui.cn/s1/2026/01/08/695ea11272c66.jpg)
+[<img src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEPmMVpYn1BP8Ek_yahXXRygeeh6WfcfQACziMAAiMJGVcUQ84L9R0GZzgE.png" alt="文存 WenSaver">](https://github.com/ttwjz/WenSaver)&emsp;
+[<img src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEPmL5pYnpQ8GLIduzTXCbUb_TBNsdbewACuiMAAiMJGVc5mu__aeihqjgE.png" alt="Get the Add-on Edge">](https://microsoftedge.microsoft.com/addons/detail/daehdpjjighepbpjobpdmhhiamjdfend)
 
 ---
 
