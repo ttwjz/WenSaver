@@ -1,5 +1,3 @@
-/* ... (前部分 #is-trigger-btn, #is-history-panel, .is-header 等保持不变) ... */
-
 /* 触发按钮 */
 #is-trigger-btn {
     position: absolute;
@@ -35,6 +33,7 @@
     max-height: 80vh;
 }
 
+/* 标题栏 */
 .is-header {
     background: #f5f5f5;
     padding: 8px 12px;
@@ -45,8 +44,37 @@
     align-items: center;
     color: #333;
     flex-shrink: 0;
+
+    /* 拖拽手势 */
     cursor: move;
     user-select: none;
+
+    /* 关键：设置为相对定位，为了让里面的“小白条”居中定位 */
+    position: relative;
+}
+
+/* 新增：拖拽指示条 (即那个“小白条/小灰条”) */
+.is-header::after {
+    content: "";
+    position: absolute;
+
+    /* 绝对居中定位 */
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+
+    /* 尺寸与外观 */
+    width: 36px;
+    /* 条的长度 */
+    height: 4px;
+    /* 条的厚度 */
+    background-color: #d1d1d1;
+    /* 使用浅灰色，在浅色背景上对比度刚好，像个凹槽 */
+    border-radius: 4px;
+    /* 圆润的边角 */
+
+    /* 关键：确保鼠标能穿透这个条，点到下面的 Header 触发拖拽 */
+    pointer-events: none;
 }
 
 .is-clear {
@@ -54,6 +82,10 @@
     cursor: pointer;
     font-size: 11px;
     font-weight: normal;
+
+    /* 关键：提升层级，防止被中间的条遮挡（虽然一般不会挡住） */
+    position: relative;
+    z-index: 1;
 }
 
 .is-clear:hover {
