@@ -1,6 +1,3 @@
-// ==========================================
-// 1. 全局变量与配置
-// ==========================================
 let isEnabled = true;
 let activeInput = null;
 let triggerBtn = null;
@@ -15,6 +12,9 @@ let showTimer = null;
 let lastMouseX = 0;
 let lastMouseY = 0;
 
+// 输入法状态锁
+let isComposing = false;
+
 // 缓存与快照
 let config = { limit: 20, timeout: 120000 };
 const historyCache = new WeakMap();
@@ -24,16 +24,11 @@ const inputSnapshot = new WeakMap();
 const DEBOUNCE_DELAY = 800;
 
 // ==========================================
-// 2. 基础工具函数 (提前定义，防止报错)
+// 1. 基础工具函数
 // ==========================================
 
-// 安全读取 Storage (防止 Context Invalidated 崩溃)
 function safeStorageGet(keys, callback) {
-    // 检查扩展上下文是否有效
-    if (!chrome.runtime?.id) {
-        console.warn("[InputSaver] 扩展上下文已失效，请刷新页面。");
-        return;
-    }
+    if (!chrome.runtime?.id) return;
     try {
         chrome.storage.local.get(keys, callback);
     } catch (e) {
@@ -41,7 +36,6 @@ function safeStorageGet(keys, callback) {
     }
 }
 
-// 安全写入 Storage
 function safeStorageSet(data, callback) {
     if (!chrome.runtime?.id) return;
     try {
@@ -51,17 +45,11 @@ function safeStorageSet(data, callback) {
     }
 }
 
-// HTML 转义 (防 XSS)
 function escapeHtml(text) {
     if (typeof text !== 'string') return "";
-    return text.replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-// 关闭所有 UI
 function removeUI() {
     if (triggerBtn) triggerBtn.style.display = 'none';
     if (panel) panel.style.display = 'none';
@@ -69,12 +57,10 @@ function removeUI() {
     stopGlobalTracker();
 }
 
-// 隐藏悬浮窗
 function hideTooltip() {
     if (tooltip) tooltip.style.display = 'none';
 }
 
-// 获取元素选择器
 function getSelector(el) {
     if (el.name) return `[name="${el.name}"]`;
     if (el.id) return `#${el.id}`;
@@ -106,46 +92,56 @@ function debounce(func, wait) {
     };
 }
 
-// 演变检测算法 (增加空值保护)
+// === 核心修复：演变检测算法 ===
 function isEvolution(oldStr, newStr) {
-    // 强制转为字符串，防止 undefined 报错
     oldStr = oldStr || "";
     newStr = newStr || "";
+
+    // 1. 优先检查追加操作 (Append)
+    // 只要新内容包含了完整的旧内容，无论加了多少字，都视为演变（合并）
+    // 解决了 "123" -> "123...拼音上屏" 分裂的问题
+    if (newStr.includes(oldStr)) {
+        return true;
+    }
 
     const lenOld = oldStr.length;
     const lenNew = newStr.length;
     const maxLen = Math.max(lenOld, lenNew);
     const diff = Math.abs(lenOld - lenNew);
 
-    if (maxLen === 0) return false; // 都是空，无所谓
+    if (maxLen === 0) return false;
+
+    // 2. 只有在不满足“追加”条件时，才进行长度差异检查
+    // 防止内容被大幅度篡改或替换
     if (diff > maxLen * 0.5) return false;
 
+    // 3. 删除操作检测 (Deletion)
     if (oldStr.includes(newStr)) {
-        // 删除保护
+        // 如果删除了大量内容 (超过15% 且 超过10个字)，视为误删/重写，返回 false (新建)
+        // 否则视为修改，返回 true (合并)
         if (diff < 10 || (diff / lenOld) < 0.15) return true;
         return false;
     }
-    if (newStr.includes(oldStr)) return true;
 
+    // 4. 修改操作检测 (Prefix Check)
     const checkLimit = 500;
     const limit = Math.min(lenOld, lenNew, checkLimit);
     let commonPrefixLen = 0;
 
-    // 这里的循环现在安全了，因为 oldStr/newStr 必定是字符串
     for (let i = 0; i < limit; i++) {
         if (oldStr[i] === newStr[i]) commonPrefixLen++;
         else break;
     }
+
     if (commonPrefixLen >= checkLimit || (commonPrefixLen / maxLen) > 0.6) return true;
 
     return false;
 }
 
 // ==========================================
-// 3. 核心逻辑 (内存缓存与保存)
+// 2. 核心逻辑
 // ==========================================
 
-// 初始化配置
 function loadConfig() {
     safeStorageGet(['extensionEnabled', 'maxHistoryLimit', 'sessionTimeout'], (res) => {
         if (!res) return;
@@ -163,7 +159,6 @@ function loadConfig() {
 }
 loadConfig();
 
-// 监听消息
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === "toggleState") {
         isEnabled = msg.state;
@@ -171,7 +166,6 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
 });
 
-// 加载历史到内存
 function loadHistoryToMemory(target, callback) {
     const key = getStorageKey(target);
     safeStorageGet([key], (res) => {
@@ -181,7 +175,6 @@ function loadHistoryToMemory(target, callback) {
     });
 }
 
-// 处理输入 (同步更新内存)
 function processInputSync(target, isForceNew = false, contentOverride = null) {
     if (!isEnabled) return;
     if (target.type === 'password') return;
@@ -191,7 +184,6 @@ function processInputSync(target, isForceNew = false, contentOverride = null) {
         content = target.value;
         if (target.isContentEditable) content = target.innerText;
     }
-    // 确保 content 是字符串
     content = content || "";
     if (content.trim() === '') return;
 
@@ -214,6 +206,7 @@ function processInputSync(target, isForceNew = false, contentOverride = null) {
         } else if (!isForceNew) {
             const timeDiff = now - latest.timestamp;
             if (timeDiff < config.timeout) {
+                // 如果时间在允许范围内，且内容判定为演变，则合并
                 if (isEvolution(latest.content, content)) {
                     latest.content = content;
                     latest.timestamp = now;
@@ -235,7 +228,6 @@ function processInputSync(target, isForceNew = false, contentOverride = null) {
     dirtyInputs.add(target);
 }
 
-// 刷盘 (硬盘写入)
 function flushDirtyData() {
     if (dirtyInputs.size === 0) return;
 
@@ -258,7 +250,129 @@ function flushDirtyData() {
 const debouncedFlush = debounce(flushDirtyData, DEBOUNCE_DELAY);
 
 // ==========================================
-// 4. 全局雷达与UI判定 (解决自动关闭问题)
+// 3. 事件监听
+// ==========================================
+
+document.addEventListener('compositionstart', (e) => {
+    isComposing = true;
+}, true);
+
+document.addEventListener('compositionend', (e) => {
+    isComposing = false;
+    handleInputEvent(e.target);
+}, true);
+
+function handleInputEvent(t) {
+    if (!(t.matches('input, textarea') || t.isContentEditable)) return;
+    if (isComposing) return;
+
+    let currentVal = t.value;
+    if (t.isContentEditable) currentVal = t.innerText;
+    currentVal = currentVal || "";
+
+    const lastVal = inputSnapshot.get(t) || "";
+    const lengthDiff = lastVal.length - currentVal.length;
+
+    if (currentVal.trim() === '' && lastVal.trim() !== '') {
+        if (lengthDiff > 1 && lastVal.length > 2) {
+            processInputSync(t, true, lastVal);
+            flushDirtyData();
+        }
+    }
+
+    if (currentVal.trim() !== '') {
+        inputSnapshot.set(t, currentVal);
+        processInputSync(t, false);
+        debouncedFlush();
+    }
+}
+
+document.addEventListener('input', (e) => {
+    handleInputEvent(e.target);
+}, true);
+
+document.addEventListener('focus', (e) => {
+    const t = e.target;
+    if (t.matches('input, textarea') || t.isContentEditable) {
+        loadHistoryToMemory(t, () => {
+            let val = t.value;
+            if (t.isContentEditable) val = t.innerText;
+            val = val || "";
+
+            if (val) inputSnapshot.set(t, val);
+
+            processInputSync(t, true);
+            debouncedFlush();
+        });
+    }
+}, true);
+
+document.addEventListener('blur', (e) => {
+    const t = e.target;
+    if (t.matches('input, textarea') || t.isContentEditable) {
+        isComposing = false;
+        processInputSync(t, false);
+        flushDirtyData();
+    }
+}, true);
+
+window.addEventListener('beforeunload', () => {
+    if (dirtyInputs.size === 0) return;
+    const dataToSave = {};
+    dirtyInputs.forEach(target => {
+        const cacheEntry = historyCache.get(target);
+        if (cacheEntry) dataToSave[cacheEntry.key] = cacheEntry.data;
+    });
+    if (chrome.runtime?.id) {
+        chrome.storage.local.set(dataToSave);
+    }
+});
+
+document.addEventListener('dblclick', (e) => {
+    if (!isEnabled) return;
+    const t = e.target;
+    if ((t.matches('input:not([type="password"]), textarea') || t.isContentEditable)) {
+        activeInput = t;
+        if (!historyCache.has(t)) {
+            loadHistoryToMemory(t, () => showTriggerButton(t));
+        } else {
+            showTriggerButton(t);
+        }
+    }
+});
+
+document.addEventListener('mousedown', (e) => {
+    const clickedPanel = panel && panel.contains(e.target);
+    const clickedTooltip = tooltip && tooltip.contains(e.target);
+    const clickedBtn = triggerBtn && triggerBtn.contains(e.target);
+    const clickedInput = e.target === activeInput;
+
+    if (clickedPanel || clickedTooltip || clickedBtn || clickedInput) return;
+    removeUI();
+});
+
+document.addEventListener('mousemove', (e) => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+}, { passive: true });
+
+document.addEventListener('scroll', (e) => {
+    if (panel && panel.style.display !== 'none') {
+        const isInternalScroll = (panel.contains(e.target) || (tooltip && tooltip.contains(e.target)));
+        if (isInternalScroll) {
+            globalMouseHandler({ clientX: lastMouseX, clientY: lastMouseY });
+        } else {
+            const hoveringPanel = isPointInRect(lastMouseX, lastMouseY, panel, 0);
+            const hoveringTooltip = isPointInRect(lastMouseX, lastMouseY, tooltip, 0);
+            if (hoveringPanel || hoveringTooltip) return;
+            removeUI();
+        }
+    }
+}, true);
+
+
+// ==========================================
+// 4. UI 渲染逻辑
 // ==========================================
 
 function startGlobalTracker() {
@@ -294,157 +408,27 @@ function globalMouseHandler(e) {
         if (!closeTimer) {
             closeTimer = setTimeout(() => {
                 hideTooltip();
-                // 仅关闭 tooltip, 保留 panel
             }, 300);
         }
     }
 }
 
-// 滚动锁
 function addScrollLock(element) {
     element.addEventListener('wheel', (e) => {
         e.stopPropagation();
         const el = element;
         const delta = e.deltaY;
-        // 如果内容不需要滚动，禁止事件穿透
         if (el.scrollHeight <= el.clientHeight) {
             e.preventDefault();
             return;
         }
         const isAtTop = el.scrollTop === 0;
         const isAtBottom = Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1;
-
         if ((delta < 0 && isAtTop) || (delta > 0 && isAtBottom)) {
             e.preventDefault();
         }
     }, { passive: false });
 }
-
-// ==========================================
-// 5. 核心事件监听
-// ==========================================
-
-// Focus: 初始化内存
-document.addEventListener('focus', (e) => {
-    const t = e.target;
-    if (t.matches('input, textarea') || t.isContentEditable) {
-        loadHistoryToMemory(t, () => {
-            let val = t.value;
-            if (t.isContentEditable) val = t.innerText;
-            val = val || ""; // 确保非null
-
-            if (val) inputSnapshot.set(t, val);
-
-            processInputSync(t, true);
-            debouncedFlush();
-        });
-    }
-}, true);
-
-// Input: 处理输入
-document.addEventListener('input', (e) => {
-    const t = e.target;
-    if (!(t.matches('input, textarea') || t.isContentEditable)) return;
-
-    let currentVal = t.value;
-    if (t.isContentEditable) currentVal = t.innerText;
-    currentVal = currentVal || "";
-
-    const lastVal = inputSnapshot.get(t) || "";
-    const lengthDiff = lastVal.length - currentVal.length;
-
-    // 紧急抢救
-    if (currentVal.trim() === '' && lastVal.trim() !== '') {
-        if (lengthDiff > 1 && lastVal.length > 2) {
-            processInputSync(t, true, lastVal);
-            flushDirtyData();
-        }
-    }
-
-    if (currentVal.trim() !== '') {
-        inputSnapshot.set(t, currentVal);
-        processInputSync(t, false);
-        debouncedFlush();
-    }
-}, true);
-
-// Blur: 立即保存
-document.addEventListener('blur', (e) => {
-    const t = e.target;
-    if (t.matches('input, textarea') || t.isContentEditable) {
-        processInputSync(t, false);
-        flushDirtyData();
-    }
-}, true);
-
-// Unload: 页面关闭前最后一次保存
-window.addEventListener('beforeunload', () => {
-    if (dirtyInputs.size === 0) return;
-    const dataToSave = {};
-    dirtyInputs.forEach(target => {
-        const cacheEntry = historyCache.get(target);
-        if (cacheEntry) dataToSave[cacheEntry.key] = cacheEntry.data;
-    });
-    // 直接调用底层 API，不使用 safeStorageSet 以确保同步性尝试
-    if (chrome.runtime?.id) {
-        chrome.storage.local.set(dataToSave);
-    }
-});
-
-// UI 触发
-document.addEventListener('dblclick', (e) => {
-    if (!isEnabled) return;
-    const t = e.target;
-    if ((t.matches('input:not([type="password"]), textarea') || t.isContentEditable)) {
-        activeInput = t;
-        // 确保内存就绪
-        if (!historyCache.has(t)) {
-            loadHistoryToMemory(t, () => showTriggerButton(t));
-        } else {
-            showTriggerButton(t);
-        }
-    }
-});
-
-// 点击外部关闭
-document.addEventListener('mousedown', (e) => {
-    // 检查面板、Tooltip、按钮是否被点击
-    const clickedPanel = panel && panel.contains(e.target);
-    const clickedTooltip = tooltip && tooltip.contains(e.target);
-    const clickedBtn = triggerBtn && triggerBtn.contains(e.target);
-    const clickedInput = e.target === activeInput;
-
-    if (clickedPanel || clickedTooltip || clickedBtn || clickedInput) {
-        return;
-    }
-    removeUI();
-});
-
-// 鼠标移动记录
-document.addEventListener('mousemove', (e) => {
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
-}, { passive: true });
-
-// 滚动关闭判定
-document.addEventListener('scroll', (e) => {
-    if (panel && panel.style.display !== 'none') {
-        const isInternalScroll = (panel.contains(e.target) || (tooltip && tooltip.contains(e.target)));
-        if (isInternalScroll) {
-            globalMouseHandler({ clientX: lastMouseX, clientY: lastMouseY });
-        } else {
-            const hoveringPanel = isPointInRect(lastMouseX, lastMouseY, panel, 0);
-            const hoveringTooltip = isPointInRect(lastMouseX, lastMouseY, tooltip, 0);
-            if (hoveringPanel || hoveringTooltip) return;
-            removeUI();
-        }
-    }
-}, true);
-
-
-// ==========================================
-// 6. UI 构建与渲染逻辑
-// ==========================================
 
 function showTriggerButton(target) {
     if (!triggerBtn) {
@@ -501,8 +485,8 @@ function showPanel() {
             if (!activeInput) return;
             if (confirm('确定清空当前输入框的所有记录？')) {
                 const key = getStorageKey(activeInput);
-                safeStorageSet({ [key]: [] }, () => { // 清空 Storage
-                    historyCache.set(activeInput, { key: key, data: [] }); // 清空内存
+                safeStorageSet({ [key]: [] }, () => {
+                    historyCache.set(activeInput, { key: key, data: [] });
                     renderList([]);
                 });
             }
