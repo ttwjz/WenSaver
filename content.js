@@ -7,13 +7,14 @@ let tooltip = null;
 // 定时器
 let closeTimer = null;
 let showTimer = null;
-
-// 记录鼠标最后位置
 let lastMouseX = 0;
 let lastMouseY = 0;
 
-// 常量
-const DEBOUNCE_DELAY = 800;
+// === 新增：快照存储 (用于记录输入框“变空前”的值) ===
+// 使用 WeakMap，这样当 DOM 元素被移除时，内存会自动回收
+const inputSnapshot = new WeakMap();
+
+const DEBOUNCE_DELAY = 500;
 
 chrome.storage.local.get(['extensionEnabled'], (res) => {
     isEnabled = res.extensionEnabled !== false;
@@ -51,63 +52,19 @@ function debounce(func, wait) {
     };
 }
 
-// === 核心优化：智能演变检测算法 ===
-function isEvolution(oldStr, newStr) {
-    if (!oldStr || !newStr) return false;
-
-    const lenOld = oldStr.length;
-    const lenNew = newStr.length;
-    const maxLen = Math.max(lenOld, lenNew);
-    const diff = Math.abs(lenOld - lenNew);
-
-    // 1. 性能截断：如果长度变化极其巨大（超过50%），直接视为重写，无需后续计算
-    if (diff > maxLen * 0.5) return false;
-
-    // 2. 删除保护 (Significant Deletion Protection)
-    // 如果是删除操作 (新内容是旧内容的子集)
-    if (oldStr.includes(newStr)) {
-        // 如果删除量很小 (小于10个字 或者 小于总长度的15%)，认为是修饰，允许覆盖
-        // 否则 (删除了大段落)，为了安全起见，返回 false (新建条目，保留原版)
-        if (diff < 10 || (diff / lenOld) < 0.15) {
-            return true;
-        }
-        return false;
-    }
-
-    // 3. 追加操作 (Addition)
-    // 如果是追加 (旧内容是新内容的子集)，通常是思路延续，允许覆盖
-    if (newStr.includes(oldStr)) {
-        return true;
-    }
-
-    // 4. 修改操作 (Prefix Check with Limit)
-    // 性能优化：只检查前 500 个字符。如果前 500 个字符一致，基本就是同一篇
-    const checkLimit = 500;
-    const limit = Math.min(lenOld, lenNew, checkLimit);
-
-    let commonPrefixLen = 0;
-    for (let i = 0; i < limit; i++) {
-        if (oldStr[i] === newStr[i]) commonPrefixLen++;
-        else break;
-    }
-
-    // 阈值优化：使用比例而不是固定字符数
-    // 如果公共前缀超过了 60% (或者超过了 checkLimit，说明开头长文一致)，视为同一语境
-    if (commonPrefixLen >= checkLimit || (commonPrefixLen / maxLen) > 0.6) {
-        return true;
-    }
-
-    return false;
-}
-
 // === 核心逻辑：智能保存 ===
-const saveInput = (target, isForceNew = false) => {
+// 参数 contentOverride: 如果传递了字符串，则直接保存该字符串，不读取 target.value
+const saveInput = (target, isForceNew = false, contentOverride = null) => {
     if (!isEnabled) return;
     if (target.type === 'password') return;
 
-    let content = target.value;
-    if (target.isContentEditable) {
-        content = target.innerText;
+    // 1. 确定要保存的内容
+    let content = contentOverride;
+    if (content === null) {
+        content = target.value;
+        if (target.isContentEditable) {
+            content = target.innerText;
+        }
     }
 
     if (!content || content.trim() === '') return;
@@ -132,24 +89,18 @@ const saveInput = (target, isForceNew = false) => {
         let shouldCreateNew = true;
 
         if (latest) {
-            // 1. 内容完全一致：仅更新时间
             if (latest.content === content) {
                 latest.timestamp = now;
                 shouldCreateNew = false;
             }
-            // 2. 尝试合并
             else if (!isForceNew) {
                 const timeDiff = now - latest.timestamp;
-
-                // 时间在允许范围内
                 if (timeDiff < timeoutMs) {
-                    // 并且内容演变判定通过 (是相似内容的修改，且没有大幅删除)
                     if (isEvolution(latest.content, content)) {
                         latest.content = content;
                         latest.timestamp = now;
                         shouldCreateNew = false;
                     }
-                    // 否则 (大幅删除或重写)，shouldCreateNew 保持 true
                 }
             }
         }
@@ -168,18 +119,102 @@ const saveInput = (target, isForceNew = false) => {
     });
 };
 
-const debouncedSave = debounce((e) => {
-    const t = e.target;
-    if (t.matches('input, textarea') || t.isContentEditable) {
-        saveInput(t, false);
+function isEvolution(oldStr, newStr) {
+    if (!oldStr || !newStr) return false;
+    const lenOld = oldStr.length;
+    const lenNew = newStr.length;
+    const maxLen = Math.max(lenOld, lenNew);
+    const diff = Math.abs(lenOld - lenNew);
+
+    if (diff > maxLen * 0.5) return false;
+
+    if (oldStr.includes(newStr)) {
+        if (diff < 10 || (diff / lenOld) < 0.15) return true;
+        return false;
     }
+    if (newStr.includes(oldStr)) return true;
+
+    const checkLimit = 500;
+    const limit = Math.min(lenOld, lenNew, checkLimit);
+    let commonPrefixLen = 0;
+    for (let i = 0; i < limit; i++) {
+        if (oldStr[i] === newStr[i]) commonPrefixLen++;
+        else break;
+    }
+    if (commonPrefixLen >= checkLimit || (commonPrefixLen / maxLen) > 0.6) return true;
+
+    return false;
+}
+
+// 防抖保存（正常打字流）
+const debouncedSave = debounce((target) => {
+    saveInput(target, false);
 }, DEBOUNCE_DELAY);
 
-document.addEventListener('input', debouncedSave, true);
+// === 核心修复：输入事件处理 ===
+document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!(t.matches('input, textarea') || t.isContentEditable)) return;
+
+    // 获取当前实时的值
+    let currentVal = t.value;
+    if (t.isContentEditable) currentVal = t.innerText;
+
+    // 确保 currentVal 是字符串，防止 null 报错
+    if (currentVal === null || currentVal === undefined) currentVal = "";
+
+    // 1. 获取之前的快照 (内存操作，极快)
+    const lastVal = inputSnapshot.get(t) || "";
+
+    // 2. 紧急抢救判定 (Anti-Data-Loss):
+    // 只有同时满足以下条件才立即保存：
+    // A. 当前变空了
+    // B. 之前有内容
+    // C. 之前的内容长度 > 2 (避免保存 "H" 这种退格残留)
+    // D. (关键) 长度变化 > 1 (说明不是按退格键一个字一个字删的，而是全选删除或脚本清空)
+    const lengthDiff = lastVal.length - currentVal.length;
+
+    if (currentVal.trim() === '' && lastVal.trim() !== '') {
+        // 如果是一次性删除了超过 1 个字符 (比如全选删除)，或者原来的内容很长
+        // 或者是被网页脚本瞬间清空的
+        if (lengthDiff > 1 && lastVal.length > 2) {
+            saveInput(t, true, lastVal);
+        }
+    }
+
+    // 3. 更新快照 (纯内存操作，无性能损耗)
+    // 只要有内容就更新，为下一次可能的意外做准备
+    if (currentVal.trim() !== '') {
+        inputSnapshot.set(t, currentVal);
+    }
+
+    // 4. 正常触发防抖保存
+    // 只有当前有内容时才放入防抖队列
+    if (currentVal.trim() !== '') {
+        debouncedSave(t);
+    }
+}, true);
+
+// === 核心修复：回车键立即保存 ===
+// 很多表单回车就是提交，这时候 debounce 来不及跑
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        const t = e.target;
+        if (t.matches('input, textarea') || t.isContentEditable) {
+            // 立即保存当前内容，不强制新建（允许合并）
+            saveInput(t, false);
+        }
+    }
+}, true);
 
 document.addEventListener('focus', (e) => {
     const t = e.target;
     if (t.matches('input, textarea') || t.isContentEditable) {
+        // 聚焦时，把当前内容存入快照，作为起点
+        let val = t.value;
+        if (t.isContentEditable) val = t.innerText;
+        if (val) inputSnapshot.set(t, val);
+
         saveInput(t, true);
     }
 }, true);
@@ -192,7 +227,7 @@ document.addEventListener('blur', (e) => {
 }, true);
 
 
-// --- UI Logic (完全保持不变) ---
+// --- UI Logic (保持不变) ---
 
 document.addEventListener('dblclick', (e) => {
     if (!isEnabled) return;
@@ -368,10 +403,8 @@ function adjustPosition(target) {
     const rect = target.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const gap = 5; // 面板与输入框的间隙
+    const gap = 5;
 
-    // 1. 重置面板样式以便测量自然高度
-    // 先清除之前可能设置过的行内 max-height，恢复 CSS 里的默认 80vh
     panel.style.maxHeight = '';
     panel.style.visibility = 'hidden';
     panel.style.display = 'flex';
@@ -379,50 +412,37 @@ function adjustPosition(target) {
     const naturalHeight = panel.offsetHeight;
     const panelWidth = panel.offsetWidth;
 
-    // 2. 计算上下可用空间
     const spaceBelow = viewportHeight - rect.bottom - gap;
     const spaceAbove = rect.top - gap;
 
     let top = 0;
-    let setMaxHeight = null; // 用于动态限制高度
+    let setMaxHeight = null;
 
-    // 3. 智能定位逻辑
-
-    // 情况 A: 下方空间充足 (首选)
     if (spaceBelow >= naturalHeight) {
         top = rect.bottom + gap;
     }
-    // 情况 B: 上方空间充足 (次选)
     else if (spaceAbove >= naturalHeight) {
         top = rect.top - naturalHeight - gap;
     }
-    // 情况 C: 上下都不够放 -> 选空间大的一侧并压缩面板
     else {
         if (spaceBelow >= spaceAbove) {
-            // 下方空间更大：放下方，限制高度
             top = rect.bottom + gap;
-            setMaxHeight = spaceBelow - 10; // 留 10px 底部安全距离
+            setMaxHeight = spaceBelow - 10;
         } else {
-            // 上方空间更大：放上方，限制高度
-            setMaxHeight = spaceAbove - 10; // 留 10px 顶部安全距离
-            // 注意：因为高度变了，top 需要根据新的高度反算
+            setMaxHeight = spaceAbove - 10;
             top = rect.top - setMaxHeight - gap;
         }
     }
 
-    // 4. 水平定位 (保持原逻辑：防止右侧溢出)
     let left = rect.left;
     if (left + panelWidth > viewportWidth) {
-        left = viewportWidth - panelWidth - 10; // 靠右对齐并留缝隙
+        left = viewportWidth - panelWidth - 10;
     }
-    if (left < 10) left = 10; // 防止左侧溢出
+    if (left < 10) left = 10;
 
-    // 5. 应用样式
     if (setMaxHeight !== null) {
         panel.style.maxHeight = `${setMaxHeight}px`;
     } else {
-        // 如果不需要压缩，保持 CSS 里的默认限制 (80vh)
-        // 但为了保险，清空行内样式
         panel.style.maxHeight = '';
     }
 
@@ -498,83 +518,53 @@ function renderList(history) {
 
 function showTooltip(content, targetEl) {
     if (!tooltip) return;
-
-    // 1. 先填充内容，重置样式，以便计算原始尺寸
     tooltip.innerText = content;
     tooltip.style.display = 'block';
-    tooltip.style.maxWidth = '';  // 清除之前的限制
-    tooltip.style.maxHeight = ''; // 清除之前的限制
-    tooltip.style.top = '-9999px'; // 先移出屏幕防止闪烁
+    tooltip.style.maxWidth = '';
+    tooltip.style.maxHeight = '';
+    tooltip.style.top = '-9999px';
     tooltip.style.left = '-9999px';
 
-    const rect = targetEl.getBoundingClientRect(); // 列表项的位置
-    const panelRect = panel.getBoundingClientRect(); // 面板的位置
+    const rect = targetEl.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const gap = 2; // 间隙
+    const gap = 2;
 
-    // === 2. 水平方向判定 (Horizontal) ===
-
-    // 计算左右剩余空间
     const spaceRight = viewportWidth - panelRect.right - gap;
     const spaceLeft = panelRect.left - gap;
-
-    // 默认最小宽度要求 (比如 300px)
     const minDesiredWidth = 300;
 
     let left = 0;
     let limitWidth = 0;
 
-    // 策略：优先右侧，如果右侧不够且左侧宽裕，则放左侧
-    // 否则放空间更大的一侧
     if (spaceRight >= minDesiredWidth || spaceRight >= spaceLeft) {
-        // 放右侧
         left = panelRect.right + gap;
-        // 限制最大宽度不能超过右侧剩余空间 (减去一点边距)
         limitWidth = viewportWidth - left - 10;
     } else {
-        // 放左侧
-        // 先计算最大可用宽度
         limitWidth = spaceLeft - 10;
-        // 后面等测量完宽度后再计算准确的 left
     }
 
-    // 应用宽度限制 (防止过宽)
-    // 这里设置 maxWidth，浏览器会自动根据文字内容换行
-    // 限制在 300px ~ 600px 之间 (或者 limitWidth)
     const finalMaxWidth = Math.min(Math.max(limitWidth, 300), 600);
     tooltip.style.maxWidth = `${finalMaxWidth}px`;
 
-    // 如果决定放左侧，现在有了宽度，可以计算 left 了
     if (spaceRight < minDesiredWidth && spaceRight < spaceLeft) {
         left = panelRect.left - tooltip.offsetWidth - gap;
     }
-
-    // 防止左侧溢出
     if (left < 5) left = 5;
 
-
-    // === 3. 垂直方向判定 (Vertical) ===
-
     const tooltipHeight = tooltip.offsetHeight;
-    let top = rect.top; // 默认与条目顶部对齐
+    let top = rect.top;
 
-    // 检查底部是否溢出
     if (top + tooltipHeight > viewportHeight - 10) {
-        // 溢出则向上平移，尝试贴底
         top = viewportHeight - tooltipHeight - 10;
     }
-
-    // 检查顶部是否溢出 (比如向上平移后，或者本身太高)
     if (top < 10) {
         top = 10;
-        // 实在放不下了，开启内部滚动
-        // 计算可用高度：视口高度 - 顶部留白(10) - 底部留白(10)
         const availableHeight = viewportHeight - 20;
         tooltip.style.maxHeight = `${availableHeight}px`;
     }
 
-    // === 4. 应用最终坐标 ===
     tooltip.style.left = left + 'px';
     tooltip.style.top = top + 'px';
 }
