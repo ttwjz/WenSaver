@@ -8,11 +8,15 @@ let tooltip = null;
 let closeTimer = null;
 let showTimer = null;
 
-// 鼠标位置
+// === 新增：动画定时器 (防止快速操作时动画错乱) ===
+let panelAnimTimer = null;
+let tooltipAnimTimer = null;
+
+// 记录鼠标最后位置
 let lastMouseX = 0;
 let lastMouseY = 0;
 
-// 输入法状态锁
+// 输入法状态
 let isComposing = false;
 
 // 缓存与快照
@@ -50,17 +54,248 @@ function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+// === 核心修改：优雅关闭 UI ===
 function removeUI() {
-    if (triggerBtn) triggerBtn.style.display = 'none';
-    if (panel) panel.style.display = 'none';
-    hideTooltip();
+    // 停止所有追踪
     stopGlobalTracker();
+    hideTooltip(); // 先关 tooltip
+
+    // 如果面板或按钮存在，且没有正在关闭中
+    if (panel && panel.classList.contains('is-visible') && !panel.classList.contains('is-exiting')) {
+        // 1. 标记为离场状态 (触发 CSS 动画)
+        panel.classList.add('is-exiting');
+        panel.classList.remove('is-visible');
+
+        if (triggerBtn) {
+            triggerBtn.classList.add('is-exiting');
+            triggerBtn.classList.remove('is-visible');
+        }
+
+        // 2. 清除旧定时器
+        if (panelAnimTimer) clearTimeout(panelAnimTimer);
+
+        // 3. 等待动画结束 (200ms 和 CSS 对应)
+        panelAnimTimer = setTimeout(() => {
+            if (panel) {
+                panel.style.display = 'none';
+                panel.classList.remove('is-exiting');
+            }
+            if (triggerBtn) {
+                triggerBtn.style.display = 'none';
+                triggerBtn.classList.remove('is-exiting');
+            }
+        }, 200);
+    } else {
+        // 还没显示出来就关掉了，直接隐藏
+        if (panel) {
+            panel.style.display = 'none';
+            panel.classList.remove('is-visible', 'is-exiting');
+        }
+        if (triggerBtn) {
+            triggerBtn.style.display = 'none';
+            triggerBtn.classList.remove('is-visible', 'is-exiting');
+        }
+    }
 }
 
+// === 核心修改：优雅隐藏 Tooltip ===
 function hideTooltip() {
-    if (tooltip) tooltip.style.display = 'none';
+    if (tooltip && tooltip.classList.contains('is-visible') && !tooltip.classList.contains('is-exiting')) {
+        tooltip.classList.add('is-exiting');
+        tooltip.classList.remove('is-visible');
+
+        if (tooltipAnimTimer) clearTimeout(tooltipAnimTimer);
+
+        tooltipAnimTimer = setTimeout(() => {
+            if (tooltip) {
+                tooltip.style.display = 'none';
+                tooltip.classList.remove('is-exiting');
+            }
+        }, 150); // 略快于面板 (150ms)
+    } else if (tooltip && !tooltip.classList.contains('is-exiting')) {
+        // 只有非 exiting 状态才强行隐藏，防止打断动画
+        tooltip.style.display = 'none';
+    }
 }
 
+// === 核心修改：优雅显示 Tooltip
+function showTooltip(content, targetEl) {
+    if (!tooltip) return;
+
+    const inner = tooltip.querySelector('.is-tooltip-content');
+    if (!inner) return;
+
+    // 1. 状态记录
+    const isAlreadyVisible = tooltip.classList.contains('is-visible') && !tooltip.classList.contains('is-exiting');
+    let startRect = null;
+
+    if (isAlreadyVisible) {
+        startRect = tooltip.getBoundingClientRect();
+    } else {
+        tooltip.classList.remove('is-exiting');
+        if (tooltipAnimTimer) clearTimeout(tooltipAnimTimer);
+    }
+
+    // 2. 准备测量环境 (Measure Phase)
+    tooltip.style.transition = 'none';
+
+    // 初始化样式：确保无限制、无滚动条干扰
+    tooltip.style.width = 'auto';
+    tooltip.style.height = 'auto';
+    tooltip.style.maxWidth = '';
+    tooltip.style.maxHeight = '';
+    tooltip.style.overflow = 'visible';
+
+    // 重置内胆
+    inner.style.width = '';
+    inner.style.height = '';
+    inner.style.minWidth = '';
+    inner.style.overflowY = 'hidden';
+    inner.innerText = content;
+
+    tooltip.style.display = 'block';
+
+    // 3. 计算屏幕布局限制 (Constraints)
+    const rect = targetEl.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const gap = 2;
+
+    // 水平逻辑
+    const spaceRight = viewportWidth - panelRect.right - gap;
+    const spaceLeft = panelRect.left - gap;
+    const minDesiredWidth = 300;
+
+    let left = 0;
+    let limitWidth = 0;
+
+    if (spaceRight >= minDesiredWidth || spaceRight >= spaceLeft) {
+        left = panelRect.right + gap;
+        limitWidth = viewportWidth - left - 10;
+    } else {
+        limitWidth = spaceLeft - 10;
+    }
+
+    // 设置最大宽度限制
+    const finalMaxWidth = Math.min(Math.max(limitWidth, 300), 600);
+    tooltip.style.maxWidth = `${finalMaxWidth}px`;
+
+    // 确定水平位置
+    if (spaceRight < minDesiredWidth && spaceRight < spaceLeft) {
+        left = panelRect.left - tooltip.offsetWidth - gap;
+    }
+    if (left < 5) left = 5;
+
+    // -----------------------------------------------------------
+    // [核心修复]：三步测量法 (The "Expand-and-Shrink" Technique)
+    // -----------------------------------------------------------
+
+    // Step A: 初步测量
+    // 此时浏览器可能因为预留滚动条空间而把文字挤换行
+    const rawRect = tooltip.getBoundingClientRect();
+
+    // Step B: 暴力扩容 (Expansion)
+    // 强行加宽 5px (超过一般滚动条宽度 2px)，消除占位影响
+    // 这一步是为了让被挤成 2 行的文字变回 1 行
+    tooltip.style.width = `${rawRect.width + 5}px`;
+
+    // Step C: 精确测量 (Refined Measurement)
+    // 现在文字排版正常了，我们读取 scrollWidth/scrollHeight 获取真实内容尺寸
+    // +1px 缓冲用于边框/亚像素
+    const realContentWidth = Math.ceil(inner.scrollWidth) + 1;
+    const realContentHeight = Math.ceil(inner.scrollHeight) + 1;
+
+    // 最终尺寸：不能超过最大限制
+    const finalWidth = Math.min(realContentWidth, finalMaxWidth);
+    // 高度先用真实高度，后面再校验屏幕垂直空间
+    let finalHeight = realContentHeight;
+
+    // -----------------------------------------------------------
+
+    // 垂直逻辑 & 滚动开启判断
+    let top = rect.top;
+    let finalMaxHeightStyle = '';
+    let shouldScroll = false;
+
+    // 重新应用高度限制逻辑
+    if (top + finalHeight > viewportHeight - 10) {
+        top = viewportHeight - finalHeight - 10;
+    }
+    if (top < 10) {
+        top = 10;
+        const availableHeight = viewportHeight - 20;
+        finalMaxHeightStyle = `${availableHeight}px`;
+        // 只有当真实高度确实超过屏幕可用高度时，才开启滚动
+        // 这里的判定比 offsetHeight 更准确
+        if (finalHeight > availableHeight) {
+            shouldScroll = true;
+        }
+    }
+
+    // 4. 应用锁定 (Lock)
+    // 内胆尺寸锁定为计算出的精确尺寸
+    inner.style.width = `${finalWidth}px`;
+
+    // 如果需要滚动，内胆高度保持自动撑开(或者设为 max)，外壳限制高度
+    // 如果不需要滚动，内胆高度锁死
+    inner.style.height = `${finalHeight}px`;
+    inner.style.overflowY = shouldScroll ? 'auto' : 'hidden';
+
+    // 5. 准备动画目标样式
+    const targetStyle = {
+        width: `${finalWidth}px`,
+        height: `${finalHeight}px`,
+        left: `${left}px`,
+        top: `${top}px`,
+        maxHeight: finalMaxHeightStyle || 'none',
+        overflow: 'hidden'
+    };
+
+    // 6. 执行动画
+    if (isAlreadyVisible && startRect) {
+        // A. 回溯
+        tooltip.style.width = `${startRect.width}px`;
+        tooltip.style.height = `${startRect.height}px`;
+        tooltip.style.left = `${startRect.left}px`;
+        tooltip.style.top = `${startRect.top}px`;
+        tooltip.style.overflow = 'hidden';
+
+        void tooltip.offsetHeight;
+
+        // C. 播放
+        tooltip.style.transition = '';
+        tooltip.style.width = targetStyle.width;
+        tooltip.style.height = targetStyle.height;
+        tooltip.style.left = targetStyle.left;
+        tooltip.style.top = targetStyle.top;
+
+        if (targetStyle.maxHeight !== 'none') {
+            tooltip.style.maxHeight = targetStyle.maxHeight;
+        } else {
+            tooltip.style.maxHeight = '';
+        }
+
+    } else {
+        // 首次显示
+        tooltip.style.transition = 'none';
+        tooltip.style.top = targetStyle.top;
+        tooltip.style.left = targetStyle.left;
+
+        tooltip.style.width = targetStyle.width;
+        tooltip.style.height = targetStyle.height;
+
+        if (targetStyle.maxHeight !== 'none') {
+            tooltip.style.maxHeight = targetStyle.maxHeight;
+        }
+
+        void tooltip.offsetHeight;
+        tooltip.style.transition = '';
+        tooltip.classList.add('is-visible');
+    }
+}
+
+// ... 辅助函数 getSelector, getStorageKey, debounce ...
 function getSelector(el) {
     if (el.name) return `[name="${el.name}"]`;
     if (el.id) return `#${el.id}`;
@@ -92,17 +327,9 @@ function debounce(func, wait) {
     };
 }
 
-// === 核心修复：演变检测算法 ===
 function isEvolution(oldStr, newStr) {
     oldStr = oldStr || "";
     newStr = newStr || "";
-
-    // 1. 优先检查追加操作 (Append)
-    // 只要新内容包含了完整的旧内容，无论加了多少字，都视为演变（合并）
-    // 解决了 "123" -> "123...拼音上屏" 分裂的问题
-    if (newStr.includes(oldStr)) {
-        return true;
-    }
 
     const lenOld = oldStr.length;
     const lenNew = newStr.length;
@@ -111,37 +338,30 @@ function isEvolution(oldStr, newStr) {
 
     if (maxLen === 0) return false;
 
-    // 2. 只有在不满足“追加”条件时，才进行长度差异检查
-    // 防止内容被大幅度篡改或替换
+    // 追加检测
+    if (newStr.includes(oldStr)) return true;
+
+    // 差异过大检测
     if (diff > maxLen * 0.5) return false;
 
-    // 3. 删除操作检测 (Deletion)
     if (oldStr.includes(newStr)) {
-        // 如果删除了大量内容 (超过15% 且 超过10个字)，视为误删/重写，返回 false (新建)
-        // 否则视为修改，返回 true (合并)
         if (diff < 10 || (diff / lenOld) < 0.15) return true;
         return false;
     }
 
-    // 4. 修改操作检测 (Prefix Check)
     const checkLimit = 500;
     const limit = Math.min(lenOld, lenNew, checkLimit);
     let commonPrefixLen = 0;
-
     for (let i = 0; i < limit; i++) {
         if (oldStr[i] === newStr[i]) commonPrefixLen++;
         else break;
     }
-
     if (commonPrefixLen >= checkLimit || (commonPrefixLen / maxLen) > 0.6) return true;
 
     return false;
 }
 
-// ==========================================
-// 2. 核心逻辑
-// ==========================================
-
+// ... 核心逻辑 loadConfig, loadHistoryToMemory ...
 function loadConfig() {
     safeStorageGet(['extensionEnabled', 'maxHistoryLimit', 'sessionTimeout'], (res) => {
         if (!res) return;
@@ -206,7 +426,6 @@ function processInputSync(target, isForceNew = false, contentOverride = null) {
         } else if (!isForceNew) {
             const timeDiff = now - latest.timestamp;
             if (timeDiff < config.timeout) {
-                // 如果时间在允许范围内，且内容判定为演变，则合并
                 if (isEvolution(latest.content, content)) {
                     latest.content = content;
                     latest.timestamp = now;
@@ -230,10 +449,8 @@ function processInputSync(target, isForceNew = false, contentOverride = null) {
 
 function flushDirtyData() {
     if (dirtyInputs.size === 0) return;
-
     const dataToSave = {};
     const processedTargets = [];
-
     dirtyInputs.forEach(target => {
         const cacheEntry = historyCache.get(target);
         if (cacheEntry) {
@@ -241,7 +458,6 @@ function flushDirtyData() {
             processedTargets.push(target);
         }
     });
-
     safeStorageSet(dataToSave, () => {
         processedTargets.forEach(t => dirtyInputs.delete(t));
     });
@@ -249,14 +465,8 @@ function flushDirtyData() {
 
 const debouncedFlush = debounce(flushDirtyData, DEBOUNCE_DELAY);
 
-// ==========================================
-// 3. 事件监听
-// ==========================================
-
-document.addEventListener('compositionstart', (e) => {
-    isComposing = true;
-}, true);
-
+// ... 事件监听 compositionstart, end, input, focus, blur, unload ...
+document.addEventListener('compositionstart', () => { isComposing = true; }, true);
 document.addEventListener('compositionend', (e) => {
     isComposing = false;
     handleInputEvent(e.target);
@@ -287,9 +497,7 @@ function handleInputEvent(t) {
     }
 }
 
-document.addEventListener('input', (e) => {
-    handleInputEvent(e.target);
-}, true);
+document.addEventListener('input', (e) => handleInputEvent(e.target), true);
 
 document.addEventListener('focus', (e) => {
     const t = e.target;
@@ -298,9 +506,7 @@ document.addEventListener('focus', (e) => {
             let val = t.value;
             if (t.isContentEditable) val = t.innerText;
             val = val || "";
-
             if (val) inputSnapshot.set(t, val);
-
             processInputSync(t, true);
             debouncedFlush();
         });
@@ -370,9 +576,8 @@ document.addEventListener('scroll', (e) => {
     }
 }, true);
 
-
 // ==========================================
-// 4. UI 渲染逻辑
+// 5. UI 渲染与控制 (部分修改)
 // ==========================================
 
 function startGlobalTracker() {
@@ -386,6 +591,9 @@ function stopGlobalTracker() {
 
 function isPointInRect(x, y, element, buffer = 0) {
     if (!element || element.style.display === 'none') return false;
+    // 如果正在执行退出动画，也视为有效区域，防止动画中途鼠标划过导致逻辑错乱
+    if (element.classList.contains('is-exiting')) return false;
+
     const rect = element.getBoundingClientRect();
     return (
         x >= rect.left - buffer &&
@@ -407,7 +615,13 @@ function globalMouseHandler(e) {
     } else {
         if (!closeTimer) {
             closeTimer = setTimeout(() => {
+                // 如果鼠标在任何一个上面，都不要关
+                // 这里再做一次严谨检查，因为 setTimeout 有延时
+                // 注意：这里不需要传参，使用最新的 DOM 状态
+                // 暂时简单处理：只关 tooltip
                 hideTooltip();
+                // 面板通常需要点击外部才关闭，或者这里也关闭？
+                // 你的需求似乎是“防丢失”，所以保持面板打开比较好
             }, 300);
         }
     }
@@ -430,6 +644,7 @@ function addScrollLock(element) {
     }, { passive: false });
 }
 
+// === 修改：showTriggerButton ===
 function showTriggerButton(target) {
     if (!triggerBtn) {
         triggerBtn = document.createElement('div');
@@ -438,7 +653,15 @@ function showTriggerButton(target) {
         triggerBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             showPanel();
-            triggerBtn.style.display = 'none';
+            // 点击后按钮消失 (也加动画)
+            triggerBtn.classList.add('is-exiting');
+            triggerBtn.classList.remove('is-visible');
+            setTimeout(() => {
+                if (triggerBtn) {
+                    triggerBtn.style.display = 'none';
+                    triggerBtn.classList.remove('is-exiting');
+                }
+            }, 200);
         });
         document.body.appendChild(triggerBtn);
     }
@@ -448,9 +671,16 @@ function showTriggerButton(target) {
     triggerBtn.style.top = (rect.top + window.pageYOffset - 12) + 'px';
     triggerBtn.style.left = (rect.right + window.pageXOffset - 12) + 'px';
 
+    // 强制重绘，触发 transition
+    requestAnimationFrame(() => {
+        triggerBtn.classList.remove('is-exiting');
+        triggerBtn.classList.add('is-visible');
+    });
+
     startGlobalTracker();
 }
 
+// === 修改：showPanel ===
 function showPanel() {
     if (!panel) {
         panel = document.createElement('div');
@@ -470,14 +700,25 @@ function showPanel() {
         const header = panel.querySelector('.is-header');
         setupDraggable(panel, header);
 
+        // 创建外壳和内胆
         tooltip = document.createElement('div');
         tooltip.id = 'is-global-tooltip';
+
+        // 创建内胆
+        const innerContent = document.createElement('div');
+        innerContent.className = 'is-tooltip-content';
+        tooltip.appendChild(innerContent); // 塞进去
+
         document.body.appendChild(tooltip);
+
+        // 滚动锁加在外壳上(防止冒泡)，但监听滚动事件要加在内胆上(因为 overflow 在内胆)
         addScrollLock(tooltip);
 
-        tooltip.addEventListener('scroll', () => {
+        // 监听内胆滚动
+        innerContent.addEventListener('scroll', () => {
             if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
         });
+
         tooltip.addEventListener('mousedown', e => e.stopPropagation());
 
         panel.querySelector('.is-clear').addEventListener('click', (e) => {
@@ -498,8 +739,21 @@ function showPanel() {
     renderList(history);
     adjustPosition(activeInput);
 
+    // 触发进场动画
+    if (panelAnimTimer) clearTimeout(panelAnimTimer);
+    panel.style.display = 'flex'; // 先显示
+    panel.classList.remove('is-exiting');
+
+    requestAnimationFrame(() => {
+        panel.classList.add('is-visible');
+    });
+
     startGlobalTracker();
 }
+
+// ... setupDraggable, adjustPosition, renderList, deleteSingleItem 保持不变 ...
+// (代码太长省略，请保留原有的逻辑，只需注意它们内部没有特殊动画逻辑)
+// 记得把最后几个函数的代码也补上，或者直接用上一版的内容，只要把上面改过的 removeUI/show/hide 替换即可。
 
 function setupDraggable(element, handle) {
     let isDragging = false;
@@ -646,59 +900,6 @@ function renderList(history) {
 
         list.appendChild(li);
     });
-}
-
-function showTooltip(content, targetEl) {
-    if (!tooltip) return;
-    tooltip.innerText = content;
-    tooltip.style.display = 'block';
-    tooltip.style.maxWidth = '';
-    tooltip.style.maxHeight = '';
-    tooltip.style.top = '-9999px';
-    tooltip.style.left = '-9999px';
-
-    const rect = targetEl.getBoundingClientRect();
-    const panelRect = panel.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const gap = 2;
-
-    const spaceRight = viewportWidth - panelRect.right - gap;
-    const spaceLeft = panelRect.left - gap;
-    const minDesiredWidth = 300;
-
-    let left = 0;
-    let limitWidth = 0;
-
-    if (spaceRight >= minDesiredWidth || spaceRight >= spaceLeft) {
-        left = panelRect.right + gap;
-        limitWidth = viewportWidth - left - 10;
-    } else {
-        limitWidth = spaceLeft - 10;
-    }
-
-    const finalMaxWidth = Math.min(Math.max(limitWidth, 300), 600);
-    tooltip.style.maxWidth = `${finalMaxWidth}px`;
-
-    if (spaceRight < minDesiredWidth && spaceRight < spaceLeft) {
-        left = panelRect.left - tooltip.offsetWidth - gap;
-    }
-    if (left < 5) left = 5;
-
-    const tooltipHeight = tooltip.offsetHeight;
-    let top = rect.top;
-
-    if (top + tooltipHeight > viewportHeight - 10) {
-        top = viewportHeight - tooltipHeight - 10;
-    }
-    if (top < 10) {
-        top = 10;
-        const availableHeight = viewportHeight - 20;
-        tooltip.style.maxHeight = `${availableHeight}px`;
-    }
-
-    tooltip.style.left = left + 'px';
-    tooltip.style.top = top + 'px';
 }
 
 function deleteSingleItem(index) {

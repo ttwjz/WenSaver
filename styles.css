@@ -1,95 +1,212 @@
-/* 触发按钮 */
+/* =========================================
+   1. 动画关键帧定义
+   ========================================= */
+
+/* 进场：上滑淡入 */
+@keyframes is-slide-up-enter {
+    0% {
+        transform: translateY(15px) scale(0.96);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+}
+
+/* 离场：下滑淡出 (比进场稍微快一点) */
+@keyframes is-slide-down-exit {
+    0% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateY(10px) scale(0.96);
+        opacity: 0;
+    }
+}
+
+/* 按钮进场：弹性放大 */
+@keyframes is-pop-in {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+
+    60% {
+        transform: scale(1.15);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* 按钮离场：快速缩小 */
+@keyframes is-pop-out {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
+}
+
+/* 悬浮窗进场：快速淡入 */
+@keyframes is-fade-enter {
+    0% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* 悬浮窗离场：快速淡出 */
+@keyframes is-fade-exit {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+}
+
+/* =========================================
+   2. 触发按钮
+   ========================================= */
 #is-trigger-btn {
     position: absolute;
     z-index: 2147483647;
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     background: #0078d4;
     color: white;
     border-radius: 50%;
     text-align: center;
-    line-height: 20px;
+    line-height: 24px;
     cursor: pointer;
     font-size: 14px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 10px rgba(0, 120, 212, 0.4);
     display: none;
     user-select: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* 状态类控制动画 */
+#is-trigger-btn.is-visible {
+    display: block;
+    animation: is-pop-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+#is-trigger-btn.is-exiting {
+    animation: is-pop-out 0.2s ease-in forwards;
+    pointer-events: none;
+    /* 离场时禁止点击 */
+}
+
+#is-trigger-btn:hover {
+    transform: scale(1.15);
+    box-shadow: 0 6px 14px rgba(0, 120, 212, 0.6);
+}
+
+/* =========================================
+   3. 历史面板
+   ========================================= */
 #is-history-panel {
     position: fixed;
     z-index: 2147483647;
     width: 300px;
-    background: #fff;
-    border: 1px solid #ccc;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.25);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    /* 更圆润 */
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.12), 0 5px 15px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(12px);
+
     display: none;
     flex-direction: column;
-    font-family: 'Segoe UI', sans-serif;
+    font-family: 'Segoe UI', system-ui, sans-serif;
     font-size: 13px;
     text-align: left;
     height: auto;
     max-height: 80vh;
 }
 
+/* 状态类控制动画 */
+#is-history-panel.is-visible {
+    display: flex;
+    animation: is-slide-up-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#is-history-panel.is-exiting {
+    animation: is-slide-down-exit 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+    pointer-events: none;
+}
+
 /* 标题栏 */
 .is-header {
-    background: #f5f5f5;
-    padding: 8px 12px;
-    border-bottom: 1px solid #eee;
-    font-weight: bold;
+    background: rgba(245, 245, 245, 0.7);
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    font-weight: 600;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    color: #333;
+    color: #444;
     flex-shrink: 0;
-
-    /* 拖拽手势 */
     cursor: move;
     user-select: none;
-
-    /* 关键：设置为相对定位，为了让里面的“小白条”居中定位 */
     position: relative;
+    border-radius: 10px 10px 0 0;
 }
 
-/* 新增：拖拽指示条 (即那个“小白条/小灰条”) */
+/* 拖拽手柄 */
 .is-header::after {
     content: "";
     position: absolute;
-
-    /* 绝对居中定位 */
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-
-    /* 尺寸与外观 */
-    width: 36px;
-    /* 条的长度 */
+    width: 32px;
     height: 4px;
-    /* 条的厚度 */
-    background-color: #d1d1d1;
-    /* 使用浅灰色，在浅色背景上对比度刚好，像个凹槽 */
-    border-radius: 4px;
-    /* 圆润的边角 */
-
-    /* 关键：确保鼠标能穿透这个条，点到下面的 Header 触发拖拽 */
+    background-color: #d8d8d8;
+    border-radius: 10px;
     pointer-events: none;
+    transition: background-color 0.2s;
+}
+
+.is-header:hover::after {
+    background-color: #bbb;
 }
 
 .is-clear {
     color: #d93025;
     cursor: pointer;
     font-size: 11px;
-    font-weight: normal;
-
-    /* 关键：提升层级，防止被中间的条遮挡（虽然一般不会挡住） */
+    font-weight: 500;
     position: relative;
     z-index: 1;
+    opacity: 0.8;
+    transition: opacity 0.2s;
 }
 
 .is-clear:hover {
-    text-decoration: underline;
+    opacity: 1;
+    text-decoration: none;
 }
 
 .is-list {
@@ -98,29 +215,43 @@
     margin: 0;
     overflow-y: auto;
     max-height: 60vh;
-    padding-bottom: 5px;
+    padding-bottom: 6px;
     overscroll-behavior: contain;
 }
 
-/* === 列表项布局重构 === */
+.is-list::-webkit-scrollbar {
+    width: 5px;
+}
+
+.is-list::-webkit-scrollbar-thumb {
+    background: #ddd;
+    border-radius: 3px;
+}
+
+.is-list::-webkit-scrollbar-thumb:hover {
+    background: #bbb;
+}
+
+/* 列表项 */
 .is-item {
     position: relative;
-    /* 关键：为按钮绝对定位提供基准 */
-    padding: 8px 12px;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f7f7f7;
     cursor: pointer;
-    background: #fff;
-    transition: background 0.1s;
+    background: transparent;
+    transition: background-color 0.15s;
 }
 
 .is-item:hover {
-    background: #eef6ff;
+    background: #f0f7ff;
 }
 
-/* 内容容器 */
+.is-item:active {
+    background: #e6f3ff;
+}
+
 .is-item-body {
-    /* 给右侧留出 20px 的空间，防止文字遮挡按钮 */
-    padding-right: 20px;
+    padding-right: 24px;
     min-width: 0;
 }
 
@@ -130,93 +261,143 @@
     text-overflow: ellipsis;
     color: #333;
     width: 100%;
+    line-height: 1.4;
 }
 
 .is-time {
     font-size: 10px;
-    color: #999;
-    margin-top: 4px;
+    color: #aaa;
+    margin-top: 3px;
+    font-weight: 400;
 }
 
-
-/* === 按钮样式 (绝对定位) === */
-
-/* 通用按钮样式 */
+/* 按钮 */
 .is-action-btn {
     position: absolute;
-    right: 6px;
-    width: 16px;
-    height: 16px;
-    line-height: 16px;
+    right: 10px;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
     text-align: center;
+    border-radius: 4px;
     font-size: 14px;
-    font-weight: bold;
     cursor: pointer;
     display: none;
-    /* 默认隐藏 */
     color: #999;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity: 0;
+    transform: scale(0.8);
 }
 
 .is-item:hover .is-action-btn {
     display: block;
+    opacity: 1;
+    transform: scale(1);
 }
 
-/* 删除按钮：右上 */
 .is-delete-btn {
-    top: 6px;
+    top: 8px;
 }
 
 .is-delete-btn:hover {
     color: #d93025;
+    background-color: rgba(217, 48, 37, 0.08);
+    transform: scale(1.1);
 }
 
-/* 复制按钮：右下 (新增) */
 .is-copy-btn {
-    bottom: 6px;
+    bottom: 8px;
     font-size: 12px;
-    /* 复制图标稍微小一点 */
 }
 
 .is-copy-btn:hover {
     color: #0078d4;
+    background-color: rgba(0, 120, 212, 0.08);
+    transform: scale(1.1);
 }
 
-
-/* ... (后部分 #is-global-tooltip 等保持不变) ... */
-
+/* =========================================
+   4. 全局悬浮窗
+   ========================================= */
+/* === 全局悬浮窗 (外壳：负责动画、定位、裁剪) === */
 #is-global-tooltip {
     position: fixed;
     z-index: 2147483648;
     display: none;
-    background: #fff;
-    color: #333;
-    padding: 10px;
-    border: 1px solid #0078d4;
-    border-radius: 4px;
-    box-shadow: 0 5px 25px rgba(0, 0, 0, 0.3);
+
+    background: rgba(30, 30, 30, 1);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+
+    /* 关键：隐藏溢出，实现“揭示”效果，防止内胆撑破外壳 */
+    overflow: hidden;
+
+    pointer-events: auto !important;
+
+    /* 所有的过渡都加在外壳上 */
+    transition:
+        top 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        left 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        height 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 0.15s ease,
+        transform 0.15s ease;
+}
+
+/* === 悬浮窗内胆 === */
+.is-tooltip-content {
+    color: #fff;
     font-family: 'Segoe UI', sans-serif;
     font-size: 13px;
     line-height: 1.5;
+
     white-space: pre-wrap;
-    word-break: break-all;
-    max-width: 500px;
-    min-width: 300px;
-    max-height: 400px;
-    overflow-y: auto;
-    pointer-events: auto !important;
+    word-break: normal;
+    overflow-wrap: break-word;
+
+    padding: 12px 14px;
+
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+
+    /* === 核心修改：默认隐藏滚动条，由 JS 按需开启 === */
+    overflow-y: hidden;
+    overflow-x: hidden;
+
     cursor: text;
-    overscroll-behavior: contain;
 }
 
-#is-global-tooltip::-webkit-scrollbar {
+
+
+/* 状态类 */
+#is-global-tooltip.is-visible {
+    display: block;
+    opacity: 1;
+    transform: scale(1);
+}
+
+#is-global-tooltip.is-exiting,
+#is-global-tooltip:not(.is-visible) {
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+}
+
+/* 滚动条样式 (作用于内胆) */
+.is-tooltip-content::-webkit-scrollbar {
     width: 6px;
 }
 
-#is-global-tooltip::-webkit-scrollbar-thumb {
-    background: #ccc;
+.is-tooltip-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.is-tooltip-content::-webkit-scrollbar-thumb {
+    background: #555;
     border-radius: 3px;
 }
 
-#is-global-tooltip::-webkit-scrollbar-thumb:hover {
-    background: #999;
+.is-tooltip-content::-webkit-scrollbar-thumb:hover {
+    background: #777;
 }
